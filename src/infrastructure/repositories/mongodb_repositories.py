@@ -177,6 +177,11 @@ class MongoDBRegistrationRepository(IRegistrationRepository):
             confirmed_at=datetime_from_mongodb(doc["confirmed_at"]) if doc.get("confirmed_at") else None,
         )
     
+    async def get_by_id(self, registration_id: str) -> Optional[Registration]:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        doc = await collection.find_one({"_id": registration_id})
+        return self._from_document(doc) if doc else None
+    
     async def get_by_student_and_course(
         self, student_id: str, course_id: str
     ) -> Optional[Registration]:
