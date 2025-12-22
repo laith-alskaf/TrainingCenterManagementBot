@@ -98,26 +98,52 @@ class MongoDBStudentRepository(IStudentRepository):
     
     def _to_document(self, student: Student) -> dict:
         """Convert student entity to MongoDB document."""
+        from domain.entities import Gender, EducationLevel
         return {
             "_id": student.id,
             "telegram_id": student.telegram_id,
+            # Personal Information
             "full_name": student.full_name,
             "phone_number": student.phone_number,
+            "gender": student.gender.value if student.gender else Gender.MALE.value,
+            "age": student.age,
+            "residence": student.residence,
+            # Education
+            "education_level": student.education_level.value if student.education_level else EducationLevel.OTHER.value,
+            "specialization": student.specialization,
+            # Profile Status
+            "profile_completed": student.profile_completed,
+            # Optional
             "email": student.email,
             "language": student.language.value,
+            # Timestamps
             "registered_at": datetime_to_mongodb(student.registered_at) if student.registered_at else None,
+            "updated_at": datetime_to_mongodb(student.updated_at) if student.updated_at else None,
         }
     
     def _from_document(self, doc: dict) -> Student:
         """Convert MongoDB document to student entity."""
+        from domain.entities import Gender, EducationLevel
         return Student(
             id=doc["_id"],
             telegram_id=doc["telegram_id"],
-            full_name=doc.get("full_name") or doc.get("name", ""),  # backward compatibility
-            phone_number=doc.get("phone_number") or doc.get("phone", ""),  # backward compatibility
+            # Personal Information (with backward compatibility)
+            full_name=doc.get("full_name") or doc.get("name", ""),
+            phone_number=doc.get("phone_number") or doc.get("phone", ""),
+            gender=Gender(doc.get("gender", "male")),
+            age=doc.get("age", 0),
+            residence=doc.get("residence", ""),
+            # Education
+            education_level=EducationLevel(doc.get("education_level", "other")),
+            specialization=doc.get("specialization"),
+            # Profile Status
+            profile_completed=doc.get("profile_completed", False),
+            # Optional
             email=doc.get("email"),
             language=Language(doc.get("language", "ar")),
+            # Timestamps
             registered_at=datetime_from_mongodb(doc["registered_at"]) if doc.get("registered_at") else None,
+            updated_at=datetime_from_mongodb(doc["updated_at"]) if doc.get("updated_at") else None,
         )
     
     async def get_by_id(self, student_id: str) -> Optional[Student]:
@@ -133,6 +159,28 @@ class MongoDBStudentRepository(IStudentRepository):
     async def get_all(self) -> List[Student]:
         collection = MongoDB.get_collection(self.COLLECTION)
         cursor = collection.find({})
+        return [self._from_document(doc) async for doc in cursor]
+    
+    async def get_with_complete_profile(self) -> List[Student]:
+        """Get students with completed profiles."""
+        collection = MongoDB.get_collection(self.COLLECTION)
+        cursor = collection.find({"profile_completed": True})
+        return [self._from_document(doc) async for doc in cursor]
+    
+    async def search_by_name(self, name: str) -> List[Student]:
+        """Search students by name (partial match)."""
+        collection = MongoDB.get_collection(self.COLLECTION)
+        cursor = collection.find({
+            "full_name": {"$regex": name, "$options": "i"}
+        })
+        return [self._from_document(doc) async for doc in cursor]
+    
+    async def search_by_phone(self, phone: str) -> List[Student]:
+        """Search students by phone number (partial match)."""
+        collection = MongoDB.get_collection(self.COLLECTION)
+        cursor = collection.find({
+            "phone_number": {"$regex": phone}
+        })
         return [self._from_document(doc) async for doc in cursor]
     
     async def save(self, student: Student) -> Student:

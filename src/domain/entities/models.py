@@ -50,6 +50,23 @@ class NotificationType(str, Enum):
     SUCCESS = "success"         # ✅ نجاح
 
 
+class Gender(str, Enum):
+    """Gender of a student."""
+    MALE = "male"               # ذكر
+    FEMALE = "female"           # أنثى
+
+
+class EducationLevel(str, Enum):
+    """Education level of a student."""
+    MIDDLE_SCHOOL = "middle_school"  # إعدادي
+    HIGH_SCHOOL = "high_school"      # ثانوي
+    DIPLOMA = "diploma"              # معهد
+    BACHELOR = "bachelor"            # بكالوريوس
+    MASTER = "master"                # ماجستير
+    PHD = "phd"                      # دكتوراه
+    OTHER = "other"                  # أخرى
+
+
 class PostStatus(str, Enum):
     """Status of a scheduled post."""
     PENDING = "pending"
@@ -131,16 +148,35 @@ class Course:
 @dataclass
 class Student:
     """
-    Student entity.
+    Student entity representing a training center student.
     All datetime fields are timezone-aware (Asia/Damascus).
+    
+    Profile must be completed before student can use services.
     """
     id: str
     telegram_id: int
-    full_name: str              # الاسم الكامل
-    phone_number: str           # رقم الهاتف
+    
+    # Personal Information
+    full_name: str                              # الاسم الثلاثي
+    phone_number: str                           # رقم الهاتف (09XXXXXXXX)
+    gender: Gender                              # الجنس
+    age: int                                    # العمر
+    residence: str                              # مكان الإقامة
+    
+    # Education Information
+    education_level: EducationLevel             # المستوى الدراسي
+    specialization: Optional[str] = None        # الاختصاص (للجامعة/المعهد)
+    
+    # Profile Status
+    profile_completed: bool = False             # هل اكتمل الملف الشخصي؟
+    
+    # Optional Fields
     email: Optional[str] = None
     language: Language = Language.ARABIC
+    
+    # Timestamps
     registered_at: datetime = field(default_factory=lambda: None)
+    updated_at: Optional[datetime] = None
     
     @classmethod
     def create(
@@ -148,19 +184,56 @@ class Student:
         telegram_id: int,
         full_name: str,
         phone_number: str,
+        gender: Gender,
+        age: int,
+        residence: str,
+        education_level: EducationLevel,
         now: datetime,
+        specialization: Optional[str] = None,
         email: Optional[str] = None,
         language: Language = Language.ARABIC,
     ) -> "Student":
-        """Factory method to create a new student."""
+        """Factory method to create a new student with complete profile."""
         return cls(
             id=generate_id(),
             telegram_id=telegram_id,
             full_name=full_name,
             phone_number=phone_number,
+            gender=gender,
+            age=age,
+            residence=residence,
+            education_level=education_level,
+            specialization=specialization,
+            profile_completed=True,
             email=email,
             language=language,
             registered_at=now,
+            updated_at=now,
+        )
+    
+    @classmethod
+    def create_incomplete(
+        cls,
+        telegram_id: int,
+        now: datetime,
+        language: Language = Language.ARABIC,
+    ) -> "Student":
+        """Factory method to create an incomplete student profile."""
+        return cls(
+            id=generate_id(),
+            telegram_id=telegram_id,
+            full_name="",
+            phone_number="",
+            gender=Gender.MALE,
+            age=0,
+            residence="",
+            education_level=EducationLevel.OTHER,
+            specialization=None,
+            profile_completed=False,
+            email=None,
+            language=language,
+            registered_at=now,
+            updated_at=now,
         )
 
 

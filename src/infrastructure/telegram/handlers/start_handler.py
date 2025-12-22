@@ -93,6 +93,12 @@ def get_admin_panel_keyboard(lang: Language) -> InlineKeyboardMarkup:
         f"{ADMIN_PREFIX}payments"
     )
     
+    # Student management
+    builder.add_button_row(
+        f"👥 " + ("إدارة الطلاب" if lang == Language.ARABIC else "Student Management"),
+        "stdview_menu"
+    )
+    
     # Targeted notification
     builder.add_button_row(
         f"📢 " + ("إرسال إشعار" if lang == Language.ARABIC else "Send Notification"),

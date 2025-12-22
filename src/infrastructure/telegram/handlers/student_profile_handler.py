@@ -1,0 +1,793 @@
+"""
+Student profile handler.
+Multi-step profile completion with validation and examples.
+"""
+from telegram import Update, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from typing import Optional, Tuple
+
+from domain.entities import Language, Gender, EducationLevel, Student
+from domain.value_objects import validate_syrian_phone, now_syria
+from infrastructure.telegram.handlers.base import get_user_language
+from infrastructure.telegram.handlers.ui_components import (
+    KeyboardBuilder, Emoji, divider,
+    format_success, format_error,
+    get_cancel_keyboard, get_home_keyboard,
+)
+
+
+# Callback prefix
+PROFILE_PREFIX = "profile_"
+
+
+# Profile steps
+class ProfileStep:
+    FULL_NAME = "full_name"
+    PHONE = "phone"
+    GENDER = "gender"
+    AGE = "age"
+    RESIDENCE = "residence"
+    EDUCATION = "education"
+    SPECIALIZATION = "specialization"
+    CONFIRM = "confirm"
+
+
+# Step order
+STEP_ORDER = [
+    ProfileStep.FULL_NAME,
+    ProfileStep.PHONE,
+    ProfileStep.GENDER,
+    ProfileStep.AGE,
+    ProfileStep.RESIDENCE,
+    ProfileStep.EDUCATION,
+    ProfileStep.SPECIALIZATION,
+    ProfileStep.CONFIRM,
+]
+
+
+def get_step_number(step: str) -> int:
+    """Get the step number (1-indexed)."""
+    try:
+        return STEP_ORDER.index(step) + 1
+    except ValueError:
+        return 0
+
+
+def get_total_steps() -> int:
+    """Get total number of steps (excluding confirm)."""
+    return len(STEP_ORDER) - 1  # Exclude confirm step
+
+
+def get_progress_bar(step: str, lang: Language) -> str:
+    """Get a visual progress bar for the current step."""
+    current = get_step_number(step)
+    total = get_total_steps()
+    
+    filled = "▓" * current
+    empty = "░" * (total - current)
+    
+    if lang == Language.ARABIC:
+        return f"الخطوة {current} من {total}\n{filled}{empty}"
+    else:
+        return f"Step {current} of {total}\n{filled}{empty}"
+
+
+def get_education_keyboard(lang: Language) -> InlineKeyboardMarkup:
+    """Get education level selection keyboard."""
+    builder = KeyboardBuilder()
+    
+    levels = [
+        (EducationLevel.MIDDLE_SCHOOL, "📚", "إعدادي" if lang == Language.ARABIC else "Middle School"),
+        (EducationLevel.HIGH_SCHOOL, "🎓", "ثانوي" if lang == Language.ARABIC else "High School"),
+        (EducationLevel.DIPLOMA, "🏫", "معهد" if lang == Language.ARABIC else "Diploma"),
+        (EducationLevel.BACHELOR, "🎓", "بكالوريوس" if lang == Language.ARABIC else "Bachelor"),
+        (EducationLevel.MASTER, "📜", "ماجستير" if lang == Language.ARABIC else "Master"),
+        (EducationLevel.PHD, "🔬", "دكتوراه" if lang == Language.ARABIC else "PhD"),
+        (EducationLevel.OTHER, "📝", "أخرى" if lang == Language.ARABIC else "Other"),
+    ]
+    
+    # Two buttons per row
+    for i in range(0, len(levels), 2):
+        for level, emoji, label in levels[i:i+2]:
+            builder.add_button(f"{emoji} {label}", f"{PROFILE_PREFIX}edu_{level.value}")
+        builder.add_row()
+    
+    builder.add_button_row(
+        f"❌ " + ("إلغاء" if lang == Language.ARABIC else "Cancel"),
+        f"{PROFILE_PREFIX}cancel"
+    )
+    
+    return builder.build()
+
+
+def get_gender_keyboard(lang: Language) -> InlineKeyboardMarkup:
+    """Get gender selection keyboard."""
+    builder = KeyboardBuilder()
+    
+    builder.add_button(
+        "👨 " + ("ذكر" if lang == Language.ARABIC else "Male"),
+        f"{PROFILE_PREFIX}gender_male"
+    )
+    builder.add_button(
+        "👩 " + ("أنثى" if lang == Language.ARABIC else "Female"),
+        f"{PROFILE_PREFIX}gender_female"
+    )
+    builder.add_row()
+    
+    builder.add_button_row(
+        f"❌ " + ("إلغاء" if lang == Language.ARABIC else "Cancel"),
+        f"{PROFILE_PREFIX}cancel"
+    )
+    
+    return builder.build()
+
+
+def needs_specialization(education_level: EducationLevel) -> bool:
+    """Check if specialization is needed for this education level."""
+    return education_level in (
+        EducationLevel.DIPLOMA,
+        EducationLevel.BACHELOR,
+        EducationLevel.MASTER,
+        EducationLevel.PHD,
+    )
+
+
+# Validation functions
+
+def validate_full_name(name: str, lang: Language) -> Tuple[bool, str, Optional[str]]:
+    """Validate full name (at least 3 words)."""
+    parts = name.strip().split()
+    
+    if len(parts) < 3:
+        if lang == Language.ARABIC:
+            return False, "", "❌ يرجى إدخال الاسم الثلاثي (3 كلمات على الأقل)"
+        else:
+            return False, "", "❌ Please enter your full name (at least 3 words)"
+    
+    if any(len(p) < 2 for p in parts):
+        if lang == Language.ARABIC:
+            return False, "", "❌ كل كلمة يجب أن تكون حرفين على الأقل"
+        else:
+            return False, "", "❌ Each word must be at least 2 characters"
+    
+    return True, name.strip(), None
+
+
+def validate_age(age_str: str, lang: Language) -> Tuple[bool, int, Optional[str]]:
+    """Validate age (10-80)."""
+    try:
+        age = int(age_str.strip())
+        if age < 10 or age > 80:
+            if lang == Language.ARABIC:
+                return False, 0, "❌ العمر يجب أن يكون بين 10 و 80 سنة"
+            else:
+                return False, 0, "❌ Age must be between 10 and 80"
+        return True, age, None
+    except ValueError:
+        if lang == Language.ARABIC:
+            return False, 0, "❌ أدخل رقماً صحيحاً (مثال: 25)"
+        else:
+            return False, 0, "❌ Enter a valid number (example: 25)"
+
+
+def validate_residence(residence: str, lang: Language) -> Tuple[bool, str, Optional[str]]:
+    """Validate residence (at least 3 characters)."""
+    residence = residence.strip()
+    if len(residence) < 3:
+        if lang == Language.ARABIC:
+            return False, "", "❌ مكان الإقامة قصير جداً (3 أحرف على الأقل)"
+        else:
+            return False, "", "❌ Residence is too short (at least 3 characters)"
+    return True, residence, None
+
+
+def validate_specialization(spec: str, lang: Language) -> Tuple[bool, str, Optional[str]]:
+    """Validate specialization (at least 2 characters)."""
+    spec = spec.strip()
+    if len(spec) < 2:
+        if lang == Language.ARABIC:
+            return False, "", "❌ الاختصاص قصير جداً"
+        else:
+            return False, "", "❌ Specialization is too short"
+    return True, spec, None
+
+
+# Message formatters
+
+def get_step_message(step: str, lang: Language, profile_data: dict = None) -> str:
+    """Get the message for a profile step."""
+    progress = get_progress_bar(step, lang)
+    
+    if step == ProfileStep.FULL_NAME:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+👤 *أدخل اسمك الثلاثي:*
+
+📌 *مثال:* `أحمد محمد العلي`
+
+⚠️ يجب أن يكون 3 كلمات على الأقل
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+👤 *Enter your full name:*
+
+📌 *Example:* `Ahmed Mohammed Ali`
+
+⚠️ Must be at least 3 words
+"""
+    
+    elif step == ProfileStep.PHONE:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+📱 *أدخل رقم هاتفك:*
+
+📌 *الصيغ المقبولة:*
+• `0912345678` ← 10 أرقام تبدأ بـ 09
+• `+963912345678` ← مع رمز الدولة
+
+📌 *مثال:* `0991234567`
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+📱 *Enter your phone number:*
+
+📌 *Valid formats:*
+• `0912345678` ← 10 digits starting with 09
+• `+963912345678` ← with country code
+
+📌 *Example:* `0991234567`
+"""
+    
+    elif step == ProfileStep.GENDER:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+👤 *اختر جنسك:*
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+👤 *Select your gender:*
+"""
+    
+    elif step == ProfileStep.AGE:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+🎂 *أدخل عمرك:*
+
+📌 *مثال:* `25`
+
+⚠️ يجب أن يكون بين 10 و 80 سنة
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+🎂 *Enter your age:*
+
+📌 *Example:* `25`
+
+⚠️ Must be between 10 and 80 years
+"""
+    
+    elif step == ProfileStep.RESIDENCE:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+🏠 *أدخل مكان إقامتك:*
+
+📌 *مثال:* `دمشق - المزة`
+
+يمكنك كتابة المدينة والحي
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+🏠 *Enter your residence:*
+
+📌 *Example:* `Damascus - Mazzeh`
+
+You can write the city and neighborhood
+"""
+    
+    elif step == ProfileStep.EDUCATION:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+🎓 *اختر مستواك الدراسي:*
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+🎓 *Select your education level:*
+"""
+    
+    elif step == ProfileStep.SPECIALIZATION:
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+📚 *أدخل اختصاصك:*
+
+📌 *أمثلة:*
+• `هندسة معلوماتية`
+• `طب بشري`
+• `إدارة أعمال`
+• `تصميم غرافيكي`
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+📚 *Enter your specialization:*
+
+📌 *Examples:*
+• `Computer Engineering`
+• `Medicine`
+• `Business Administration`
+• `Graphic Design`
+"""
+    
+    elif step == ProfileStep.CONFIRM:
+        data = profile_data or {}
+        
+        gender_ar = "ذكر" if data.get("gender") == Gender.MALE else "أنثى"
+        gender_en = "Male" if data.get("gender") == Gender.MALE else "Female"
+        
+        edu_labels = {
+            EducationLevel.MIDDLE_SCHOOL: ("إعدادي", "Middle School"),
+            EducationLevel.HIGH_SCHOOL: ("ثانوي", "High School"),
+            EducationLevel.DIPLOMA: ("معهد", "Diploma"),
+            EducationLevel.BACHELOR: ("بكالوريوس", "Bachelor"),
+            EducationLevel.MASTER: ("ماجستير", "Master"),
+            EducationLevel.PHD: ("دكتوراه", "PhD"),
+            EducationLevel.OTHER: ("أخرى", "Other"),
+        }
+        edu = data.get("education_level", EducationLevel.OTHER)
+        edu_ar, edu_en = edu_labels.get(edu, ("أخرى", "Other"))
+        
+        spec = data.get("specialization", "")
+        spec_line = ""
+        if spec:
+            spec_line = f"📚 *الاختصاص:* {spec}\n" if lang == Language.ARABIC else f"📚 *Specialization:* {spec}\n"
+        
+        if lang == Language.ARABIC:
+            return f"""
+✅ *تأكيد الملف الشخصي*
+{divider()}
+
+👤 *الاسم:* {data.get('full_name', '')}
+📱 *الهاتف:* {data.get('phone_number', '')}
+👤 *الجنس:* {gender_ar}
+🎂 *العمر:* {data.get('age', 0)} سنة
+🏠 *الإقامة:* {data.get('residence', '')}
+🎓 *التحصيل:* {edu_ar}
+{spec_line}
+{divider()}
+
+هل المعلومات صحيحة؟
+"""
+        else:
+            return f"""
+✅ *Confirm Profile*
+{divider()}
+
+👤 *Name:* {data.get('full_name', '')}
+📱 *Phone:* {data.get('phone_number', '')}
+👤 *Gender:* {gender_en}
+🎂 *Age:* {data.get('age', 0)} years
+🏠 *Residence:* {data.get('residence', '')}
+🎓 *Education:* {edu_en}
+{spec_line}
+{divider()}
+
+Is this information correct?
+"""
+    
+    return ""
+
+
+def get_confirm_keyboard(lang: Language) -> InlineKeyboardMarkup:
+    """Get confirmation keyboard."""
+    builder = KeyboardBuilder()
+    
+    builder.add_button(
+        f"✅ " + ("تأكيد" if lang == Language.ARABIC else "Confirm"),
+        f"{PROFILE_PREFIX}confirm_yes"
+    )
+    builder.add_button(
+        f"✏️ " + ("تعديل" if lang == Language.ARABIC else "Edit"),
+        f"{PROFILE_PREFIX}edit"
+    )
+    builder.add_row()
+    
+    return builder.build()
+
+
+# Handler functions
+
+async def start_profile_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Start the profile completion flow."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    lang = get_user_language(context)
+    
+    # Initialize profile data
+    context.user_data['profile_flow'] = {
+        'step': ProfileStep.FULL_NAME,
+        'data': {},
+    }
+    
+    message = get_step_message(ProfileStep.FULL_NAME, lang)
+    keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+    
+    if query:
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+    else:
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+
+
+async def handle_profile_text_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> bool:
+    """Handle text input for profile completion."""
+    flow = context.user_data.get('profile_flow')
+    if not flow:
+        return False
+    
+    step = flow.get('step')
+    if step not in [ProfileStep.FULL_NAME, ProfileStep.PHONE, ProfileStep.AGE,
+                    ProfileStep.RESIDENCE, ProfileStep.SPECIALIZATION]:
+        return False
+    
+    lang = get_user_language(context)
+    text = update.message.text.strip()
+    
+    # Validate based on step
+    if step == ProfileStep.FULL_NAME:
+        is_valid, value, error = validate_full_name(text, lang)
+        if not is_valid:
+            await update.message.reply_text(error)
+            return True
+        flow['data']['full_name'] = value
+        # Move to phone
+        flow['step'] = ProfileStep.PHONE
+        message = get_step_message(ProfileStep.PHONE, lang)
+        keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    elif step == ProfileStep.PHONE:
+        is_valid, normalized, error = validate_syrian_phone(text)
+        if not is_valid:
+            if lang == Language.ARABIC:
+                await update.message.reply_text(
+                    f"❌ {error}\n\n"
+                    f"📌 الصيغ المقبولة:\n"
+                    f"• `0912345678`\n"
+                    f"• `+963912345678`",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ {error}\n\n"
+                    f"📌 Valid formats:\n"
+                    f"• `0912345678`\n"
+                    f"• `+963912345678`",
+                    parse_mode='Markdown'
+                )
+            return True
+        flow['data']['phone_number'] = normalized
+        # Move to gender
+        flow['step'] = ProfileStep.GENDER
+        message = get_step_message(ProfileStep.GENDER, lang)
+        keyboard = get_gender_keyboard(lang)
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    elif step == ProfileStep.AGE:
+        is_valid, value, error = validate_age(text, lang)
+        if not is_valid:
+            await update.message.reply_text(error)
+            return True
+        flow['data']['age'] = value
+        # Move to residence
+        flow['step'] = ProfileStep.RESIDENCE
+        message = get_step_message(ProfileStep.RESIDENCE, lang)
+        keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    elif step == ProfileStep.RESIDENCE:
+        is_valid, value, error = validate_residence(text, lang)
+        if not is_valid:
+            await update.message.reply_text(error)
+            return True
+        flow['data']['residence'] = value
+        # Move to education
+        flow['step'] = ProfileStep.EDUCATION
+        message = get_step_message(ProfileStep.EDUCATION, lang)
+        keyboard = get_education_keyboard(lang)
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    elif step == ProfileStep.SPECIALIZATION:
+        is_valid, value, error = validate_specialization(text, lang)
+        if not is_valid:
+            await update.message.reply_text(error)
+            return True
+        flow['data']['specialization'] = value
+        # Move to confirm
+        flow['step'] = ProfileStep.CONFIRM
+        message = get_step_message(ProfileStep.CONFIRM, lang, flow['data'])
+        keyboard = get_confirm_keyboard(lang)
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    context.user_data['profile_flow'] = flow
+    return True
+
+
+async def handle_profile_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    container,
+) -> bool:
+    """Handle profile-related callbacks."""
+    query = update.callback_query
+    if not query or not query.data.startswith(PROFILE_PREFIX):
+        return False
+    
+    data = query.data[len(PROFILE_PREFIX):]
+    lang = get_user_language(context)
+    flow = context.user_data.get('profile_flow', {})
+    
+    # Start profile
+    if data == "start":
+        await start_profile_flow(update, context)
+        return True
+    
+    # Cancel
+    elif data == "cancel":
+        await query.answer()
+        context.user_data.pop('profile_flow', None)
+        if lang == Language.ARABIC:
+            message = "❌ تم إلغاء إكمال الملف الشخصي"
+        else:
+            message = "❌ Profile completion cancelled"
+        keyboard = get_home_keyboard(lang)
+        await query.edit_message_text(message, reply_markup=keyboard)
+        return True
+    
+    # Gender selection
+    elif data.startswith("gender_"):
+        await query.answer()
+        gender = Gender.MALE if data == "gender_male" else Gender.FEMALE
+        flow['data']['gender'] = gender
+        # Move to age
+        flow['step'] = ProfileStep.AGE
+        context.user_data['profile_flow'] = flow
+        message = get_step_message(ProfileStep.AGE, lang)
+        keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    # Education selection
+    elif data.startswith("edu_"):
+        await query.answer()
+        edu_value = data.replace("edu_", "")
+        education = EducationLevel(edu_value)
+        flow['data']['education_level'] = education
+        
+        # Check if specialization is needed
+        if needs_specialization(education):
+            flow['step'] = ProfileStep.SPECIALIZATION
+            context.user_data['profile_flow'] = flow
+            message = get_step_message(ProfileStep.SPECIALIZATION, lang)
+            keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+            await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        else:
+            flow['data']['specialization'] = None
+            flow['step'] = ProfileStep.CONFIRM
+            context.user_data['profile_flow'] = flow
+            message = get_step_message(ProfileStep.CONFIRM, lang, flow['data'])
+            keyboard = get_confirm_keyboard(lang)
+            await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    # Edit (go back to start)
+    elif data == "edit":
+        await query.answer()
+        flow['step'] = ProfileStep.FULL_NAME
+        context.user_data['profile_flow'] = flow
+        message = get_step_message(ProfileStep.FULL_NAME, lang)
+        keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    # Confirm profile
+    elif data == "confirm_yes":
+        await query.answer()
+        
+        user_id = update.effective_user.id
+        profile_data = flow.get('data', {})
+        
+        # Get or create student
+        student = await container.student_repo.get_by_telegram_id(user_id)
+        now = now_syria()
+        
+        if student:
+            # Update existing
+            student.full_name = profile_data.get('full_name', '')
+            student.phone_number = profile_data.get('phone_number', '')
+            student.gender = profile_data.get('gender', Gender.MALE)
+            student.age = profile_data.get('age', 0)
+            student.residence = profile_data.get('residence', '')
+            student.education_level = profile_data.get('education_level', EducationLevel.OTHER)
+            student.specialization = profile_data.get('specialization')
+            student.profile_completed = True
+            student.updated_at = now
+        else:
+            # Create new
+            student = Student.create(
+                telegram_id=user_id,
+                full_name=profile_data.get('full_name', ''),
+                phone_number=profile_data.get('phone_number', ''),
+                gender=profile_data.get('gender', Gender.MALE),
+                age=profile_data.get('age', 0),
+                residence=profile_data.get('residence', ''),
+                education_level=profile_data.get('education_level', EducationLevel.OTHER),
+                now=now,
+                specialization=profile_data.get('specialization'),
+                language=lang,
+            )
+        
+        await container.student_repo.save(student)
+        
+        # Clear flow
+        context.user_data.pop('profile_flow', None)
+        
+        if lang == Language.ARABIC:
+            message = f"""
+{Emoji.SUCCESS} *تم إكمال ملفك الشخصي بنجاح!*
+{divider()}
+
+يمكنك الآن تصفح الدورات والتسجيل.
+
+اضغط /start للعودة للقائمة الرئيسية.
+"""
+        else:
+            message = f"""
+{Emoji.SUCCESS} *Profile Completed Successfully!*
+{divider()}
+
+You can now browse courses and register.
+
+Press /start to return to main menu.
+"""
+        
+        keyboard = get_home_keyboard(lang)
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    return False
+
+
+async def check_profile_complete(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    container,
+) -> bool:
+    """Check if student profile is complete. Returns True if complete."""
+    user_id = update.effective_user.id
+    student = await container.student_repo.get_by_telegram_id(user_id)
+    
+    if not student or not student.profile_completed:
+        return False
+    return True
+
+
+async def show_profile_required_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Show message that profile is required."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    lang = get_user_language(context)
+    
+    if lang == Language.ARABIC:
+        message = f"""
+⚠️ *يرجى إكمال ملفك الشخصي أولاً!*
+{divider()}
+
+لاستخدام خدمات المركز، يجب عليك إكمال ملفك الشخصي.
+
+انقر الزر أدناه للبدء:
+"""
+    else:
+        message = f"""
+⚠️ *Please Complete Your Profile First!*
+{divider()}
+
+To use training center services, you must complete your profile.
+
+Click the button below to start:
+"""
+    
+    builder = KeyboardBuilder()
+    builder.add_button_row(
+        f"📝 " + ("إكمال الملف الشخصي" if lang == Language.ARABIC else "Complete Profile"),
+        f"{PROFILE_PREFIX}start"
+    )
+    
+    if query:
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=builder.build())
+    else:
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=builder.build())

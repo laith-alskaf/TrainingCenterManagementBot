@@ -53,6 +53,19 @@ from infrastructure.telegram.handlers.student_registration_handler import (
     start_registration_flow,
     REG_PREFIX,
 )
+from infrastructure.telegram.handlers.student_profile_handler import (
+    handle_profile_callback,
+    handle_profile_text_input,
+    start_profile_flow,
+    check_profile_complete,
+    show_profile_required_message,
+    PROFILE_PREFIX,
+)
+from infrastructure.telegram.handlers.admin_student_viewer_handler import (
+    handle_student_viewer_callback,
+    handle_search_input,
+    STUDENT_VIEWER_PREFIX,
+)
 from infrastructure.telegram.handlers.base import log_handler
 from domain.entities import Language, Platform, ScheduledPost
 from domain.value_objects import now_syria
@@ -190,6 +203,14 @@ def setup_handlers(application: Application, container: Container) -> None:
     async def student_registration_callback(update: Update, context):
         await handle_registration_callback(update, context, container)
     
+    # Student profile callback handler
+    async def student_profile_callback(update: Update, context):
+        await handle_profile_callback(update, context, container)
+    
+    # Admin student viewer callback handler
+    async def admin_student_viewer_callback(update: Update, context):
+        await handle_student_viewer_callback(update, context, container)
+    
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern="^admin_"))
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern=f"^{COURSE_CREATE_PREFIX}"))
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern=f"^{UPLOAD_SELECT_PREFIX}"))
@@ -197,6 +218,8 @@ def setup_handlers(application: Application, container: Container) -> None:
     application.add_handler(CallbackQueryHandler(payment_admin_callback, pattern=f"^{PAYMENT_PREFIX}"))
     application.add_handler(CallbackQueryHandler(notification_admin_callback, pattern=f"^{NOTIF_PREFIX}"))
     application.add_handler(CallbackQueryHandler(student_registration_callback, pattern=f"^{REG_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(student_profile_callback, pattern=f"^{PROFILE_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(admin_student_viewer_callback, pattern=f"^{STUDENT_VIEWER_PREFIX}"))
     
     # Text message handler for registration, course creation, and admin actions
     async def handle_text_input(update: Update, context):
@@ -204,8 +227,16 @@ def setup_handlers(application: Application, container: Container) -> None:
         lang = get_user_language(context)
         user_id = update.effective_user.id
         
-        # Student registration flow (new - with phone validation)
+        # Student profile flow (with validation)
+        if await handle_profile_text_input(update, context):
+            return
+        
+        # Student registration flow (with phone validation)
         if await handle_registration_text_input(update, context):
+            return
+        
+        # Admin student search
+        if await handle_search_input(update, context, container):
             return
         
         # Payment amount input
