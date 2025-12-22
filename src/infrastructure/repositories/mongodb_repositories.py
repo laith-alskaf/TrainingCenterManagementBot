@@ -328,3 +328,24 @@ class MongoDBScheduledPostRepository(IScheduledPostRepository):
             upsert=True
         )
         return post
+    
+    async def get_by_id(self, post_id: str) -> Optional[ScheduledPost]:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        doc = await collection.find_one({"_id": post_id})
+        return self._from_document(doc) if doc else None
+    
+    async def update_status(
+        self,
+        post_id: str,
+        status: PostStatus,
+        error_message: Optional[str] = None,
+    ) -> bool:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        update_data = {"status": status.value}
+        if error_message:
+            update_data["error_message"] = error_message
+        result = await collection.update_one(
+            {"_id": post_id},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
