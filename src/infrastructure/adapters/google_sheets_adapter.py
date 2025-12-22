@@ -2,6 +2,7 @@
 Google Sheets adapter for reading scheduled posts.
 Columns: content | image_url | date | time | platform | status
 """
+import json
 import logging
 from typing import List, Optional
 from google.oauth2 import service_account
@@ -31,7 +32,7 @@ class GoogleSheetsAdapter:
         Initialize the Google Sheets adapter.
         
         Args:
-            service_account_file: Path to service account JSON file
+            service_account_file: Path to service account JSON file OR JSON content directly
             spreadsheet_id: Google Sheets spreadsheet ID
             sheet_name: Name of the sheet tab (e.g., "Sheet1" or "Posts")
         """
@@ -40,13 +41,31 @@ class GoogleSheetsAdapter:
         self._sheet_name = sheet_name
         self._service = None
     
-    def _get_service(self):
-        """Get or create the Sheets service."""
-        if self._service is None:
-            credentials = service_account.Credentials.from_service_account_file(
+    def _get_credentials(self):
+        """Get credentials from file path or JSON content."""
+        # Check if it's JSON content (starts with {)
+        if self._service_account_file.strip().startswith('{'):
+            # Parse JSON content directly
+            try:
+                info = json.loads(self._service_account_file)
+                return service_account.Credentials.from_service_account_info(
+                    info,
+                    scopes=self.SCOPES
+                )
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse service account JSON: {e}")
+                raise
+        else:
+            # It's a file path
+            return service_account.Credentials.from_service_account_file(
                 self._service_account_file,
                 scopes=self.SCOPES
             )
+    
+    def _get_service(self):
+        """Get or create the Sheets service."""
+        if self._service is None:
+            credentials = self._get_credentials()
             self._service = build('sheets', 'v4', credentials=credentials)
         return self._service
     

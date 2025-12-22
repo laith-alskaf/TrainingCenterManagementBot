@@ -1,6 +1,7 @@
 """
 Google Drive adapter for file uploads and management.
 """
+import json
 import logging
 import os
 from typing import List, Optional
@@ -23,20 +24,38 @@ class GoogleDriveAdapter:
         Initialize the Google Drive adapter.
         
         Args:
-            service_account_file: Path to service account JSON file
+            service_account_file: Path to service account JSON file OR JSON content directly
             folder_id: Default folder ID for uploads
         """
         self._service_account_file = service_account_file
         self._folder_id = folder_id
         self._service = None
     
-    def _get_service(self):
-        """Get or create the Drive service."""
-        if self._service is None:
-            credentials = service_account.Credentials.from_service_account_file(
+    def _get_credentials(self):
+        """Get credentials from file path or JSON content."""
+        # Check if it's JSON content (starts with {)
+        if self._service_account_file.strip().startswith('{'):
+            # Parse JSON content directly
+            try:
+                info = json.loads(self._service_account_file)
+                return service_account.Credentials.from_service_account_info(
+                    info,
+                    scopes=self.SCOPES
+                )
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse service account JSON: {e}")
+                raise
+        else:
+            # It's a file path
+            return service_account.Credentials.from_service_account_file(
                 self._service_account_file,
                 scopes=self.SCOPES
             )
+    
+    def _get_service(self):
+        """Get or create the Drive service."""
+        if self._service is None:
+            credentials = self._get_credentials()
             self._service = build('drive', 'v3', credentials=credentials)
         return self._service
     
