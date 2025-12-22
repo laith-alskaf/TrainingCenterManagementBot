@@ -51,6 +51,22 @@ class GoogleDriveAdapter:
         """Get OAuth credentials for user authentication."""
         creds = None
         
+        # Check if token is provided via environment variable (for server deployment)
+        # This allows running on servers without browser access
+        token_env = os.getenv('GOOGLE_OAUTH_TOKEN', '')
+        if token_env.strip().startswith('{') and not os.path.exists(self.TOKEN_FILE):
+            try:
+                import json
+                # Validate JSON and write to token file
+                token_data = json.loads(token_env)
+                with open(self.TOKEN_FILE, 'w') as f:
+                    json.dump(token_data, f)
+                logger.info(f"Created {self.TOKEN_FILE} from GOOGLE_OAUTH_TOKEN environment variable")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse GOOGLE_OAUTH_TOKEN: {e}")
+            except Exception as e:
+                logger.error(f"Failed to create token file from env: {e}")
+        
         # Check if we have saved token
         if os.path.exists(self.TOKEN_FILE):
             try:
