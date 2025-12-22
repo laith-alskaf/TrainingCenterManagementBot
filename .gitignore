@@ -1,0 +1,7 @@
+credentials.json
+DOCS.md
+pytest.ini
+.env
+SERVICES_GUIDE.md
+bot.log
+__pycache__

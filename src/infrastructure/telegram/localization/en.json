@@ -1,0 +1,101 @@
+{
+    "welcome": {
+        "greeting": "Welcome to the Training Center Platform! 👋",
+        "description": "You can use the following commands:",
+        "commands": {
+            "courses": "/courses - View available courses",
+            "register": "/register - Register for a course",
+            "materials": "/materials - Access course materials",
+            "language": "/language - Change language"
+        }
+    },
+    "courses": {
+        "title": "📚 Available Courses",
+        "no_courses": "No courses available at the moment",
+        "course_info": {
+            "instructor": "Instructor",
+            "dates": "Dates",
+            "price": "Price",
+            "seats": "Available Seats",
+            "status": "Status"
+        },
+        "statuses": {
+            "published": "Open for Registration",
+            "ongoing": "In Progress",
+            "completed": "Completed",
+            "cancelled": "Cancelled"
+        }
+    },
+    "registration": {
+        "title": "📝 Course Registration",
+        "select_course": "Select a course to register:",
+        "enter_name": "Please enter your full name:",
+        "enter_phone": "Please enter your phone number (optional, send /skip to skip):",
+        "enter_email": "Please enter your email (optional, send /skip to skip):",
+        "success": "✅ You have been successfully registered for the course!",
+        "already_registered": "You are already registered for this course",
+        "course_full": "Sorry, the course is full",
+        "course_not_available": "Course is not available for registration",
+        "error": "An error occurred during registration. Please try again."
+    },
+    "materials": {
+        "title": "📁 Course Materials",
+        "select_course": "Select a course to view its materials:",
+        "no_materials": "No materials available for this course yet",
+        "no_registrations": "You haven't registered for any course yet"
+    },
+    "language": {
+        "title": "🌍 Select Language",
+        "select": "Choose your preferred language:",
+        "arabic": "العربية",
+        "english": "English",
+        "changed": "✅ Language changed to English"
+    },
+    "admin": {
+        "not_authorized": "⛔ You are not authorized to access this command",
+        "post": {
+            "title": "📮 Create New Post",
+            "enter_content": "Enter the post content:",
+            "select_platform": "Select the platform to publish:",
+            "enter_image": "Send an image or image URL (or /skip to skip):",
+            "publishing": "Publishing...",
+            "success": "✅ Published successfully!",
+            "partial_success": "⚠️ Partial success - some platforms failed",
+            "failed": "❌ Publishing failed",
+            "instagram_requires_image": "⚠️ Instagram requires an image"
+        },
+        "broadcast": {
+            "title": "📢 Broadcast Message",
+            "enter_message": "Enter the message to broadcast:",
+            "sending": "Sending...",
+            "success": "✅ Sent to {successful} of {total} users",
+            "no_users": "No users to send the message to"
+        },
+        "upload": {
+            "title": "📤 Upload File",
+            "send_file": "Send the file to upload:",
+            "uploading": "Uploading...",
+            "success": "✅ File uploaded successfully!\nLink: {link}",
+            "failed": "❌ File upload failed: {error}"
+        }
+    },
+    "errors": {
+        "general": "An error occurred. Please try again.",
+        "invalid_input": "Invalid input. Please try again.",
+        "cancelled": "Operation cancelled"
+    },
+    "buttons": {
+        "cancel": "Cancel",
+        "back": "Back",
+        "skip": "Skip",
+        "confirm": "Confirm",
+        "facebook": "Facebook",
+        "instagram": "Instagram",
+        "both": "Both"
+    },
+    "notifications": {
+        "post_published": "📣 New post published on {platform}",
+        "scheduler_error": "⚠️ Scheduler error: {error}",
+        "drive_upload_error": "⚠️ File upload error: {error}"
+    }
+}
