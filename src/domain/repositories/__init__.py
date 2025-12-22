@@ -5,6 +5,7 @@ from  domain.repositories.interfaces import (
     IRegistrationRepository,
     IUserPreferencesRepository,
     IScheduledPostRepository,
+    IPaymentRecordRepository,
 )
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "IRegistrationRepository",
     "IUserPreferencesRepository",
     "IScheduledPostRepository",
+    "IPaymentRecordRepository",
 ]

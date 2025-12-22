@@ -14,6 +14,7 @@ from infrastructure.repositories import (
     MongoDBRegistrationRepository,
     MongoDBUserPreferencesRepository,
     MongoDBScheduledPostRepository,
+    MongoDBPaymentRecordRepository,
 )
 from infrastructure.adapters import (
     GoogleDriveAdapter,
@@ -22,19 +23,38 @@ from infrastructure.adapters import (
 )
 from infrastructure.scheduler import PostScheduler
 from application.use_cases import (
+    # Course
     GetCoursesUseCase,
     GetCourseByIdUseCase,
     CreateCourseUseCase,
+    # Legacy Registration
     RegisterStudentUseCase,
     GetStudentRegistrationsUseCase,
+    # File
     UploadFileUseCase,
     UploadToCoursesUseCase,
     GetMaterialsUseCase,
+    # Post
     PublishPostUseCase,
     CheckAndPublishPostsUseCase,
+    # Language
     SetLanguageUseCase,
     GetLanguageUseCase,
+    # Broadcast
     BroadcastMessageUseCase,
+    # Registration v2
+    RequestRegistrationUseCase,
+    ApproveRegistrationUseCase,
+    RejectRegistrationUseCase,
+    GetPendingRegistrationsUseCase,
+    # Payment
+    AddPaymentUseCase,
+    GetPaymentHistoryUseCase,
+    GetCourseStudentsUseCase,
+    # Notifications
+    GetCoursesToRemindUseCase,
+    GetTargetedNotificationRecipientsUseCase,
+    GetStudentProfileUseCase,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,26 +72,53 @@ class Container:
     registration_repo: MongoDBRegistrationRepository
     user_prefs_repo: MongoDBUserPreferencesRepository
     post_repo: MongoDBScheduledPostRepository
+    payment_repo: MongoDBPaymentRecordRepository
     
     # Adapters
     drive_adapter: GoogleDriveAdapter
     sheets_adapter: GoogleSheetsAdapter
     meta_adapter: MetaGraphAdapter
     
-    # Use Cases
+    # Use Cases - Courses
     get_courses: GetCoursesUseCase
     get_course_by_id: GetCourseByIdUseCase
     create_course: CreateCourseUseCase
+    
+    # Use Cases - Registration (legacy)
     register_student: RegisterStudentUseCase
     get_registrations: GetStudentRegistrationsUseCase
+    
+    # Use Cases - Registration v2
+    request_registration: RequestRegistrationUseCase
+    approve_registration: ApproveRegistrationUseCase
+    reject_registration: RejectRegistrationUseCase
+    get_pending_registrations: GetPendingRegistrationsUseCase
+    
+    # Use Cases - Payment
+    add_payment: AddPaymentUseCase
+    get_payment_history: GetPaymentHistoryUseCase
+    get_course_students: GetCourseStudentsUseCase
+    
+    # Use Cases - Files
     upload_file: UploadFileUseCase
     upload_to_courses: UploadToCoursesUseCase
     get_materials: GetMaterialsUseCase
+    
+    # Use Cases - Post
     publish_post: PublishPostUseCase
     check_and_publish: CheckAndPublishPostsUseCase
+    
+    # Use Cases - Language
     set_language: SetLanguageUseCase
     get_language: GetLanguageUseCase
+    
+    # Use Cases - Broadcast
     broadcast_message: BroadcastMessageUseCase
+    
+    # Use Cases - Notifications
+    get_courses_to_remind: GetCoursesToRemindUseCase
+    get_notification_recipients: GetTargetedNotificationRecipientsUseCase
+    get_student_profile: GetStudentProfileUseCase
     
     # Scheduler
     scheduler: PostScheduler
@@ -104,6 +151,7 @@ async def create_container(app_config: Optional[Config] = None) -> Container:
     registration_repo = MongoDBRegistrationRepository()
     user_prefs_repo = MongoDBUserPreferencesRepository()
     post_repo = MongoDBScheduledPostRepository()
+    payment_repo = MongoDBPaymentRecordRepository()
     
     # Create adapters
     drive_adapter = GoogleDriveAdapter(
@@ -121,29 +169,51 @@ async def create_container(app_config: Optional[Config] = None) -> Container:
         instagram_account_id=app_config.meta.instagram_account_id,
     )
     
-    # Create use cases
+    # Create use cases - Courses
     get_courses = GetCoursesUseCase(course_repo)
     get_course_by_id = GetCourseByIdUseCase(course_repo)
     create_course = CreateCourseUseCase(course_repo, drive_adapter)
+    
+    # Create use cases - Registration (legacy)
     register_student = RegisterStudentUseCase(student_repo, course_repo, registration_repo)
     get_registrations = GetStudentRegistrationsUseCase(student_repo, registration_repo, course_repo)
+    
+    # Create use cases - Registration v2
+    request_registration = RequestRegistrationUseCase(student_repo, registration_repo, course_repo)
+    approve_registration = ApproveRegistrationUseCase(registration_repo)
+    reject_registration = RejectRegistrationUseCase(registration_repo)
+    get_pending_registrations = GetPendingRegistrationsUseCase(registration_repo, student_repo, course_repo)
+    
+    # Create use cases - Payment
+    add_payment = AddPaymentUseCase(registration_repo, payment_repo, course_repo)
+    get_payment_history = GetPaymentHistoryUseCase(payment_repo)
+    get_course_students = GetCourseStudentsUseCase(registration_repo, student_repo, payment_repo, course_repo)
+    
+    # Create use cases - Files
     upload_file = UploadFileUseCase(drive_adapter)
     upload_to_courses = UploadToCoursesUseCase(drive_adapter, course_repo)
     get_materials = GetMaterialsUseCase(drive_adapter, course_repo)
+    
+    # Create use cases - Post
+    publish_post = PublishPostUseCase(meta_adapter)
+    check_and_publish = CheckAndPublishPostsUseCase(
+        sheets_adapter=sheets_adapter,
+        publish_use_case=publish_post,
+    )
+    
+    # Create use cases - Language & Broadcast
     set_language = SetLanguageUseCase(user_prefs_repo)
     get_language = GetLanguageUseCase(user_prefs_repo)
     broadcast_message = BroadcastMessageUseCase(user_prefs_repo, student_repo)
-    publish_post = PublishPostUseCase(meta_adapter)
+    
+    # Create use cases - Notifications
+    get_courses_to_remind = GetCoursesToRemindUseCase(course_repo, registration_repo, student_repo, payment_repo)
+    get_notification_recipients = GetTargetedNotificationRecipientsUseCase(registration_repo, student_repo)
+    get_student_profile = GetStudentProfileUseCase(student_repo, registration_repo, course_repo, payment_repo)
     
     # Create scheduler
     scheduler = PostScheduler(
         check_interval_minutes=app_config.scheduler.check_interval_minutes,
-    )
-    
-    # Create check_and_publish use case with callbacks (will be set up later)
-    check_and_publish = CheckAndPublishPostsUseCase(
-        sheets_adapter=sheets_adapter,
-        publish_use_case=publish_post,
     )
     
     logger.info("Dependency injection container initialized successfully")
@@ -155,24 +225,42 @@ async def create_container(app_config: Optional[Config] = None) -> Container:
         registration_repo=registration_repo,
         user_prefs_repo=user_prefs_repo,
         post_repo=post_repo,
+        payment_repo=payment_repo,
         # Adapters
         drive_adapter=drive_adapter,
         sheets_adapter=sheets_adapter,
         meta_adapter=meta_adapter,
-        # Use Cases
+        # Use Cases - Courses
         get_courses=get_courses,
         get_course_by_id=get_course_by_id,
         create_course=create_course,
+        # Use Cases - Registration (legacy)
         register_student=register_student,
         get_registrations=get_registrations,
+        # Use Cases - Registration v2
+        request_registration=request_registration,
+        approve_registration=approve_registration,
+        reject_registration=reject_registration,
+        get_pending_registrations=get_pending_registrations,
+        # Use Cases - Payment
+        add_payment=add_payment,
+        get_payment_history=get_payment_history,
+        get_course_students=get_course_students,
+        # Use Cases - Files
         upload_file=upload_file,
         upload_to_courses=upload_to_courses,
         get_materials=get_materials,
+        # Use Cases - Post
         publish_post=publish_post,
         check_and_publish=check_and_publish,
+        # Use Cases - Language & Broadcast
         set_language=set_language,
         get_language=get_language,
         broadcast_message=broadcast_message,
+        # Use Cases - Notifications
+        get_courses_to_remind=get_courses_to_remind,
+        get_notification_recipients=get_notification_recipients,
+        get_student_profile=get_student_profile,
         # Scheduler
         scheduler=scheduler,
     )

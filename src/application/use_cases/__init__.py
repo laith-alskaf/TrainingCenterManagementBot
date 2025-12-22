@@ -5,7 +5,7 @@ from application.use_cases.use_cases import (
     GetCourseByIdUseCase,
     CreateCourseUseCase,
     CreateCourseResult,
-    # Registration
+    # Registration (legacy)
     RegisterStudentUseCase,
     GetStudentRegistrationsUseCase,
     RegistrationResult,
@@ -26,7 +26,37 @@ from application.use_cases.use_cases import (
     BroadcastResult,
 )
 
+from application.use_cases.registration_use_cases import (
+    # Registration v2
+    RequestRegistrationUseCase,
+    ApproveRegistrationUseCase,
+    RejectRegistrationUseCase,
+    GetPendingRegistrationsUseCase,
+    RegistrationRequestResult,
+    ApprovalResult,
+    # Payment
+    AddPaymentUseCase,
+    GetPaymentHistoryUseCase,
+    GetCourseStudentsUseCase,
+    PaymentResult,
+)
+
+from application.use_cases.notification_use_cases import (
+    # Notifications
+    GetCoursesToRemindUseCase,
+    GetTargetedNotificationRecipientsUseCase,
+    GetStudentProfileUseCase,
+    # Helpers
+    format_notification_message,
+    get_notification_emoji,
+    get_notification_label,
+    # Results
+    NotificationResult,
+    StudentProfileResult,
+)
+
 __all__ = [
+    # Legacy
     "GetCoursesUseCase",
     "GetCourseByIdUseCase",
     "CreateCourseUseCase",
@@ -45,4 +75,25 @@ __all__ = [
     "GetLanguageUseCase",
     "BroadcastMessageUseCase",
     "BroadcastResult",
+    # Registration v2
+    "RequestRegistrationUseCase",
+    "ApproveRegistrationUseCase",
+    "RejectRegistrationUseCase",
+    "GetPendingRegistrationsUseCase",
+    "RegistrationRequestResult",
+    "ApprovalResult",
+    # Payment
+    "AddPaymentUseCase",
+    "GetPaymentHistoryUseCase",
+    "GetCourseStudentsUseCase",
+    "PaymentResult",
+    # Notifications
+    "GetCoursesToRemindUseCase",
+    "GetTargetedNotificationRecipientsUseCase",
+    "GetStudentProfileUseCase",
+    "format_notification_message",
+    "get_notification_emoji",
+    "get_notification_label",
+    "NotificationResult",
+    "StudentProfileResult",
 ]

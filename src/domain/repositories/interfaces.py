@@ -10,8 +10,10 @@ from  domain.entities import (
     Registration,
     ScheduledPost,
     UserPreferences,
+    PaymentRecord,
     Language,
     PostStatus,
+    RegistrationStatus,
 )
 
 
@@ -114,6 +116,11 @@ class IRegistrationRepository(ABC):
     async def count_by_course(self, course_id: str) -> int:
         """Count registrations for a course."""
         pass
+    
+    @abstractmethod
+    async def get_by_status(self, status: RegistrationStatus) -> List[Registration]:
+        """Get all registrations with a specific status."""
+        pass
 
 
 class IUserPreferencesRepository(ABC):
@@ -166,4 +173,33 @@ class IScheduledPostRepository(ABC):
         error_message: Optional[str] = None,
     ) -> bool:
         """Update post status."""
+        pass
+
+
+class IPaymentRecordRepository(ABC):
+    """Interface for payment record data access."""
+    
+    @abstractmethod
+    async def get_by_id(self, record_id: str) -> Optional[PaymentRecord]:
+        """Get a payment record by ID."""
+        pass
+    
+    @abstractmethod
+    async def get_by_registration(self, registration_id: str) -> List[PaymentRecord]:
+        """Get all payment records for a registration."""
+        pass
+    
+    @abstractmethod
+    async def save(self, record: PaymentRecord) -> PaymentRecord:
+        """Save a payment record."""
+        pass
+    
+    @abstractmethod
+    async def get_total_paid(self, registration_id: str) -> float:
+        """Get total amount paid for a registration."""
+        pass
+    
+    @abstractmethod
+    async def delete(self, record_id: str) -> bool:
+        """Delete a payment record."""
         pass

@@ -32,6 +32,27 @@ from infrastructure.telegram.handlers.admin_flow_handler import (
     get_upload_course_selection_message,
     get_upload_course_keyboard,
 )
+from infrastructure.telegram.handlers.admin_registration_handler import (
+    handle_registration_admin_callback,
+    REG_ADMIN_PREFIX,
+)
+from infrastructure.telegram.handlers.admin_payment_handler import (
+    handle_payment_admin_callback,
+    handle_payment_amount_input,
+    show_course_students_for_payment,
+    PAYMENT_PREFIX,
+)
+from infrastructure.telegram.handlers.admin_notification_handler import (
+    handle_notification_admin_callback,
+    handle_notification_content_input,
+    NOTIF_PREFIX,
+)
+from infrastructure.telegram.handlers.student_registration_handler import (
+    handle_registration_callback,
+    handle_registration_text_input,
+    start_registration_flow,
+    REG_PREFIX,
+)
 from infrastructure.telegram.handlers.base import log_handler
 from domain.entities import Language, Platform, ScheduledPost
 from domain.value_objects import now_syria
@@ -121,6 +142,28 @@ def setup_handlers(application: Application, container: Container) -> None:
             await query.edit_message_text(message, reply_markup=keyboard, parse_mode='Markdown')
             return
         
+        # Handle admin_payments (course selection for payment management)
+        if action == "admin_payments":
+            await query.answer()
+            lang = get_user_language(context)
+            courses = await container.get_courses.execute(available_only=False)
+            
+            if not courses:
+                msg = "❌ لا توجد دورات" if lang == Language.ARABIC else "❌ No courses"
+                await query.edit_message_text(msg)
+                return
+            
+            # Show course selection for payment management
+            from infrastructure.telegram.handlers.ui_components import KeyboardBuilder
+            builder = KeyboardBuilder()
+            for course in courses:
+                builder.add_button_row(f"📚 {course.name}", f"{PAYMENT_PREFIX}list_{course.id}")
+            builder.add_button_row("🔙 " + ("رجوع" if lang == Language.ARABIC else "Back"), "admin_panel")
+            
+            msg = "💰 *إدارة المدفوعات*\n\nاختر دورة:" if lang == Language.ARABIC else "💰 *Payment Management*\n\nSelect course:"
+            await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=builder.build())
+            return
+        
         # Fall through to original admin handler
         from infrastructure.telegram.handlers.start_handler import admin_callback_handler
         await admin_callback_handler(
@@ -131,15 +174,47 @@ def setup_handlers(application: Application, container: Container) -> None:
             registration_repo=container.registration_repo,
         )
     
+    # Registration admin callback handler
+    async def registration_admin_callback(update: Update, context):
+        await handle_registration_admin_callback(update, context, container)
+    
+    # Payment admin callback handler
+    async def payment_admin_callback(update: Update, context):
+        await handle_payment_admin_callback(update, context, container)
+    
+    # Notification admin callback handler
+    async def notification_admin_callback(update: Update, context):
+        await handle_notification_admin_callback(update, context, container)
+    
+    # Student registration callback handler
+    async def student_registration_callback(update: Update, context):
+        await handle_registration_callback(update, context, container)
+    
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern="^admin_"))
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern=f"^{COURSE_CREATE_PREFIX}"))
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern=f"^{UPLOAD_SELECT_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(registration_admin_callback, pattern=f"^{REG_ADMIN_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(payment_admin_callback, pattern=f"^{PAYMENT_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(notification_admin_callback, pattern=f"^{NOTIF_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(student_registration_callback, pattern=f"^{REG_PREFIX}"))
     
     # Text message handler for registration, course creation, and admin actions
     async def handle_text_input(update: Update, context):
         """Handle text input for registration, course creation and admin flows."""
         lang = get_user_language(context)
         user_id = update.effective_user.id
+        
+        # Student registration flow (new - with phone validation)
+        if await handle_registration_text_input(update, context):
+            return
+        
+        # Payment amount input
+        if await handle_payment_amount_input(update, context):
+            return
+        
+        # Notification content input
+        if await handle_notification_content_input(update, context):
+            return
         
         # Course creation flow (priority)
         if context.user_data.get('creating_course'):

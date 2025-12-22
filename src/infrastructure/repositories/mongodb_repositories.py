@@ -5,12 +5,12 @@ from typing import List, Optional
 from datetime import datetime
 
 from domain.entities import (
-    Course, Student, Registration, ScheduledPost, UserPreferences,
-    CourseStatus, RegistrationStatus, PostStatus, Language,
+    Course, Student, Registration, ScheduledPost, UserPreferences, PaymentRecord,
+    CourseStatus, RegistrationStatus, PostStatus, Language, PaymentMethod,
 )
 from domain.repositories import (
     ICourseRepository, IStudentRepository, IRegistrationRepository,
-    IUserPreferencesRepository, IScheduledPostRepository,
+    IUserPreferencesRepository, IScheduledPostRepository, IPaymentRecordRepository,
 )
 from domain.value_objects import datetime_to_mongodb, datetime_from_mongodb, now_syria
 from infrastructure.database import MongoDB
@@ -101,8 +101,8 @@ class MongoDBStudentRepository(IStudentRepository):
         return {
             "_id": student.id,
             "telegram_id": student.telegram_id,
-            "name": student.name,
-            "phone": student.phone,
+            "full_name": student.full_name,
+            "phone_number": student.phone_number,
             "email": student.email,
             "language": student.language.value,
             "registered_at": datetime_to_mongodb(student.registered_at) if student.registered_at else None,
@@ -113,8 +113,8 @@ class MongoDBStudentRepository(IStudentRepository):
         return Student(
             id=doc["_id"],
             telegram_id=doc["telegram_id"],
-            name=doc["name"],
-            phone=doc.get("phone"),
+            full_name=doc.get("full_name") or doc.get("name", ""),  # backward compatibility
+            phone_number=doc.get("phone_number") or doc.get("phone", ""),  # backward compatibility
             email=doc.get("email"),
             language=Language(doc.get("language", "ar")),
             registered_at=datetime_from_mongodb(doc["registered_at"]) if doc.get("registered_at") else None,
@@ -162,19 +162,26 @@ class MongoDBRegistrationRepository(IRegistrationRepository):
             "student_id": registration.student_id,
             "course_id": registration.course_id,
             "status": registration.status.value,
+            "payment_status": registration.payment_status.value,
             "registered_at": datetime_to_mongodb(registration.registered_at) if registration.registered_at else None,
-            "confirmed_at": datetime_to_mongodb(registration.confirmed_at) if registration.confirmed_at else None,
+            "approved_at": datetime_to_mongodb(registration.approved_at) if registration.approved_at else None,
+            "approved_by": registration.approved_by,
+            "notes": registration.notes,
         }
     
     def _from_document(self, doc: dict) -> Registration:
         """Convert MongoDB document to registration entity."""
+        from domain.entities import PaymentStatus
         return Registration(
             id=doc["_id"],
             student_id=doc["student_id"],
             course_id=doc["course_id"],
             status=RegistrationStatus(doc["status"]),
+            payment_status=PaymentStatus(doc.get("payment_status", "unpaid")),
             registered_at=datetime_from_mongodb(doc["registered_at"]) if doc.get("registered_at") else None,
-            confirmed_at=datetime_from_mongodb(doc["confirmed_at"]) if doc.get("confirmed_at") else None,
+            approved_at=datetime_from_mongodb(doc["approved_at"]) if doc.get("approved_at") else None,
+            approved_by=doc.get("approved_by"),
+            notes=doc.get("notes"),
         )
     
     async def get_by_id(self, registration_id: str) -> Optional[Registration]:
@@ -206,8 +213,13 @@ class MongoDBRegistrationRepository(IRegistrationRepository):
         collection = MongoDB.get_collection(self.COLLECTION)
         return await collection.count_documents({
             "course_id": course_id,
-            "status": {"$in": [RegistrationStatus.PENDING.value, RegistrationStatus.CONFIRMED.value]}
+            "status": {"$in": [RegistrationStatus.PENDING.value, RegistrationStatus.APPROVED.value]}
         })
+    
+    async def get_by_status(self, status: RegistrationStatus) -> List[Registration]:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        cursor = collection.find({"status": status.value})
+        return [self._from_document(doc) async for doc in cursor]
     
     async def save(self, registration: Registration) -> Registration:
         collection = MongoDB.get_collection(self.COLLECTION)
@@ -349,3 +361,66 @@ class MongoDBScheduledPostRepository(IScheduledPostRepository):
             {"$set": update_data}
         )
         return result.modified_count > 0
+
+
+class MongoDBPaymentRecordRepository(IPaymentRecordRepository):
+    """MongoDB implementation of payment record repository."""
+    
+    COLLECTION = "payment_records"
+    
+    def _to_document(self, record: PaymentRecord) -> dict:
+        """Convert payment record entity to MongoDB document."""
+        return {
+            "_id": record.id,
+            "registration_id": record.registration_id,
+            "amount": record.amount,
+            "paid_at": datetime_to_mongodb(record.paid_at) if record.paid_at else None,
+            "method": record.method.value,
+            "received_by": record.received_by,
+            "notes": record.notes,
+        }
+    
+    def _from_document(self, doc: dict) -> PaymentRecord:
+        """Convert MongoDB document to payment record entity."""
+        return PaymentRecord(
+            id=doc["_id"],
+            registration_id=doc["registration_id"],
+            amount=doc["amount"],
+            paid_at=datetime_from_mongodb(doc["paid_at"]) if doc.get("paid_at") else None,
+            method=PaymentMethod(doc["method"]),
+            received_by=doc["received_by"],
+            notes=doc.get("notes"),
+        )
+    
+    async def get_by_id(self, record_id: str) -> Optional[PaymentRecord]:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        doc = await collection.find_one({"_id": record_id})
+        return self._from_document(doc) if doc else None
+    
+    async def get_by_registration(self, registration_id: str) -> List[PaymentRecord]:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        cursor = collection.find({"registration_id": registration_id}).sort("paid_at", -1)
+        return [self._from_document(doc) async for doc in cursor]
+    
+    async def save(self, record: PaymentRecord) -> PaymentRecord:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        await collection.replace_one(
+            {"_id": record.id},
+            self._to_document(record),
+            upsert=True
+        )
+        return record
+    
+    async def get_total_paid(self, registration_id: str) -> float:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        pipeline = [
+            {"$match": {"registration_id": registration_id}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]
+        result = await collection.aggregate(pipeline).to_list(1)
+        return result[0]["total"] if result else 0.0
+    
+    async def delete(self, record_id: str) -> bool:
+        collection = MongoDB.get_collection(self.COLLECTION)
+        result = await collection.delete_one({"_id": record_id})
+        return result.deleted_count > 0

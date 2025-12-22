@@ -5,6 +5,7 @@ from  infrastructure.repositories.mongodb_repositories import (
     MongoDBRegistrationRepository,
     MongoDBUserPreferencesRepository,
     MongoDBScheduledPostRepository,
+    MongoDBPaymentRecordRepository,
 )
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "MongoDBRegistrationRepository",
     "MongoDBUserPreferencesRepository",
     "MongoDBScheduledPostRepository",
+    "MongoDBPaymentRecordRepository",
 ]

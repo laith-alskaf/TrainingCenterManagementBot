@@ -71,6 +71,24 @@ def get_admin_panel_keyboard(lang: Language) -> InlineKeyboardMarkup:
     """Create admin panel keyboard."""
     builder = KeyboardBuilder()
     
+    # Pending registrations
+    builder.add_button_row(
+        f"📝 " + ("طلبات التسجيل" if lang == Language.ARABIC else "Pending Registrations"),
+        "regadm_list"
+    )
+    
+    # Payment management - select course first
+    builder.add_button_row(
+        f"💰 " + ("إدارة المدفوعات" if lang == Language.ARABIC else "Payment Management"),
+        f"{ADMIN_PREFIX}payments"
+    )
+    
+    # Targeted notification
+    builder.add_button_row(
+        f"📢 " + ("إرسال إشعار" if lang == Language.ARABIC else "Send Notification"),
+        "adnotif_start"
+    )
+    
     # Create course button
     builder.add_button_row(
         f"{Emoji.CREATE} " + ("إنشاء دورة" if lang == Language.ARABIC else "Create Course"),
@@ -111,6 +129,7 @@ def get_admin_panel_keyboard(lang: Language) -> InlineKeyboardMarkup:
     builder.add_home_button(lang)
     
     return builder.build()
+
 
 
 def get_back_button(lang: Language) -> InlineKeyboardMarkup:

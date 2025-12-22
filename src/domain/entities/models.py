@@ -20,10 +20,34 @@ class CourseStatus(str, Enum):
 
 class RegistrationStatus(str, Enum):
     """Status of a student registration."""
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+    PENDING = "pending"         # طلب معلق
+    APPROVED = "approved"       # تم القبول
+    REJECTED = "rejected"       # مرفوض
+    CANCELLED = "cancelled"     # ملغي
+
+
+class PaymentStatus(str, Enum):
+    """Payment status for a registration."""
+    UNPAID = "unpaid"           # لم يدفع
+    PARTIAL = "partial"         # دفع جزئي
+    PAID = "paid"               # دفع كامل
+
+
+class PaymentMethod(str, Enum):
+    """Payment method for a payment record."""
+    CASH = "cash"               # نقد
+    TRANSFER = "transfer"       # تحويل
+    CARD = "card"               # بطاقة
+    OTHER = "other"             # أخرى
+
+
+class NotificationType(str, Enum):
+    """Type of notification to send."""
+    INFO = "info"               # ℹ️ معلومات
+    REMINDER = "reminder"       # 🔔 تذكير
+    WARNING = "warning"         # ⚠️ تنبيه
+    URGENT = "urgent"           # 🚨 عاجل
+    SUCCESS = "success"         # ✅ نجاح
 
 
 class PostStatus(str, Enum):
@@ -112,8 +136,8 @@ class Student:
     """
     id: str
     telegram_id: int
-    name: str
-    phone: Optional[str] = None
+    full_name: str              # الاسم الكامل
+    phone_number: str           # رقم الهاتف
     email: Optional[str] = None
     language: Language = Language.ARABIC
     registered_at: datetime = field(default_factory=lambda: None)
@@ -122,9 +146,9 @@ class Student:
     def create(
         cls,
         telegram_id: int,
-        name: str,
+        full_name: str,
+        phone_number: str,
         now: datetime,
-        phone: Optional[str] = None,
         email: Optional[str] = None,
         language: Language = Language.ARABIC,
     ) -> "Student":
@@ -132,8 +156,8 @@ class Student:
         return cls(
             id=generate_id(),
             telegram_id=telegram_id,
-            name=name,
-            phone=phone,
+            full_name=full_name,
+            phone_number=phone_number,
             email=email,
             language=language,
             registered_at=now,
@@ -150,8 +174,11 @@ class Registration:
     student_id: str
     course_id: str
     status: RegistrationStatus = RegistrationStatus.PENDING
+    payment_status: PaymentStatus = PaymentStatus.UNPAID
     registered_at: datetime = field(default_factory=lambda: None)
-    confirmed_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[int] = None   # Admin telegram_id who approved
+    notes: Optional[str] = None          # Admin notes
     
     @classmethod
     def create(
@@ -243,4 +270,40 @@ class UserPreferences:
         return cls(
             telegram_id=telegram_id,
             language=language,
+        )
+
+
+@dataclass
+class PaymentRecord:
+    """
+    Payment record entity for tracking individual payments.
+    Each registration can have multiple payment records.
+    """
+    id: str
+    registration_id: str
+    amount: float                    # المبلغ المدفوع
+    paid_at: datetime               # تاريخ الدفع
+    method: PaymentMethod           # طريقة الدفع
+    received_by: int                # Admin telegram_id
+    notes: Optional[str] = None     # ملاحظات
+    
+    @classmethod
+    def create(
+        cls,
+        registration_id: str,
+        amount: float,
+        method: PaymentMethod,
+        received_by: int,
+        now: datetime,
+        notes: Optional[str] = None,
+    ) -> "PaymentRecord":
+        """Factory method to create a new payment record."""
+        return cls(
+            id=generate_id(),
+            registration_id=registration_id,
+            amount=amount,
+            paid_at=now,
+            method=method,
+            received_by=received_by,
+            notes=notes,
         )
