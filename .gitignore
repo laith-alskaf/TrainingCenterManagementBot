@@ -7,3 +7,5 @@ bot.log
 __pycache__
 WORKFLOW.md
 SETUP_GUIDE.md
+client_secret.json
+token.json

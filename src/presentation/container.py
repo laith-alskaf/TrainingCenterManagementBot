@@ -157,6 +157,7 @@ async def create_container(app_config: Optional[Config] = None) -> Container:
     drive_adapter = GoogleDriveAdapter(
         service_account_file=app_config.google.service_account_file,
         folder_id=app_config.google.drive_folder_id,
+        oauth_client_secret_file=app_config.google.oauth_client_secret_file,
     )
     sheets_adapter = GoogleSheetsAdapter(
         service_account_file=app_config.google.service_account_file,

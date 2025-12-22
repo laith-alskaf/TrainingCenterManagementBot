@@ -37,6 +37,7 @@ class GoogleConfig:
     drive_folder_id: str
     sheets_id: str
     sheets_name: str  # Name of the sheet tab (e.g., "Sheet1" or "Posts")
+    oauth_client_secret_file: str = "client_secret.json"  # OAuth for folder creation
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ def load_config() -> Config:
             drive_folder_id=os.getenv("GOOGLE_DRIVE_FOLDER_ID", ""),
             sheets_id=os.getenv("GOOGLE_SHEETS_ID", ""),
             sheets_name=os.getenv("GOOGLE_SHEETS_NAME", "Sheet1"),
+            oauth_client_secret_file=os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "client_secret.json"),
         ),
         meta=MetaConfig(
             access_token=os.getenv("META_ACCESS_TOKEN", ""),

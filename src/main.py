@@ -93,8 +93,85 @@ def setup_handlers(application: Application, container: Container) -> None:
         application: Telegram Application instance
         container: Dependency injection container
     """
-    # Start command
-    application.add_handler(get_start_handler())
+    from telegram.ext import CommandHandler
+    from infrastructure.telegram.handlers.ui_components import KeyboardBuilder, divider
+    
+    # Custom start handler with profile check
+    async def start_with_profile_check(update: Update, context):
+        """Start handler that checks if student profile is complete."""
+        lang = get_user_language(context)
+        user_id = update.effective_user.id
+        is_admin_user = config.telegram.is_admin(user_id)
+        
+        # Admins bypass profile check
+        if is_admin_user:
+            from infrastructure.telegram.handlers.start_handler import get_welcome_message, get_main_menu_keyboard
+            message = get_welcome_message(lang, is_admin_user)
+            keyboard = get_main_menu_keyboard(lang, is_admin_user)
+            await update.message.reply_text(message, reply_markup=keyboard, parse_mode='Markdown')
+            return
+        
+        # Check if student exists and has completed profile
+        student = await container.student_repo.get_by_telegram_id(user_id)
+        
+        if not student or not student.profile_completed:
+            # Show profile required message
+            if lang == Language.ARABIC:
+                message = f"""
+🎓 *مرحباً بك في مركز التدريب!*
+{divider()}
+
+لاستخدام خدمات المركز، يرجى إكمال ملفك الشخصي أولاً.
+
+📝 *المعلومات المطلوبة:*
+• الاسم الثلاثي
+• رقم الهاتف
+• الجنس
+• العمر
+• مكان الإقامة
+• المستوى الدراسي
+
+انقر الزر أدناه للبدء:
+"""
+            else:
+                message = f"""
+🎓 *Welcome to Training Center!*
+{divider()}
+
+To use our services, please complete your profile first.
+
+📝 *Required Information:*
+• Full Name
+• Phone Number
+• Gender
+• Age
+• Residence
+• Education Level
+
+Click the button below to start:
+"""
+            
+            builder = KeyboardBuilder()
+            builder.add_button_row(
+                f"📝 " + ("إكمال الملف الشخصي" if lang == Language.ARABIC else "Complete Profile"),
+                f"{PROFILE_PREFIX}start"
+            )
+            builder.add_button_row(
+                f"🌍 " + ("تغيير اللغة" if lang == Language.ARABIC else "Language"),
+                "nav_language"
+            )
+            
+            await update.message.reply_text(message, parse_mode='Markdown', reply_markup=builder.build())
+            return
+        
+        # Profile complete - show main menu
+        from infrastructure.telegram.handlers.start_handler import get_welcome_message, get_main_menu_keyboard
+        message = get_welcome_message(lang, is_admin_user)
+        keyboard = get_main_menu_keyboard(lang, is_admin_user)
+        await update.message.reply_text(message, reply_markup=keyboard, parse_mode='Markdown')
+    
+    # Start command with profile check
+    application.add_handler(CommandHandler("start", start_with_profile_check))
     
     # Main navigation callback handler - handles all button navigation
     application.add_handler(create_navigation_callback_handler(

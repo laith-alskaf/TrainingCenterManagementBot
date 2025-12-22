@@ -1,63 +1,99 @@
 """
 Google Drive adapter for file uploads and management.
+Uses OAuth for all operations to save files in user's personal Drive.
 """
 import json
 import logging
 import os
 from typing import List, Optional
-import httpx
-from google.oauth2 import service_account
+from pathlib import Path
+import io
+
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
-import io
 
 logger = logging.getLogger(__name__)
 
 
 class GoogleDriveAdapter:
-    """Adapter for Google Drive API operations."""
+    """
+    Adapter for Google Drive API operations.
+    
+    Uses OAuth for all operations to save files in user's personal Drive,
+    avoiding Service Account storage quota issues.
+    """
     
     SCOPES = ['https://www.googleapis.com/auth/drive']
+    TOKEN_FILE = 'token.json'  # Stores OAuth tokens
     
-    def __init__(self, service_account_file: str, folder_id: str):
+    def __init__(
+        self,
+        service_account_file: str,  # Kept for backward compatibility
+        folder_id: str,
+        oauth_client_secret_file: str = "client_secret.json",
+    ):
         """
         Initialize the Google Drive adapter.
         
         Args:
-            service_account_file: Path to service account JSON file OR JSON content directly
+            service_account_file: (Deprecated) Path to service account file
             folder_id: Default folder ID for uploads
+            oauth_client_secret_file: Path to OAuth client secret file
         """
-        self._service_account_file = service_account_file
         self._folder_id = folder_id
-        self._service = None
+        self._oauth_client_secret_file = oauth_client_secret_file
+        self._oauth_service = None
     
-    def _get_credentials(self):
-        """Get credentials from file path or JSON content."""
-        # Check if it's JSON content (starts with {)
-        if self._service_account_file.strip().startswith('{'):
-            # Parse JSON content directly
+    def _get_oauth_credentials(self):
+        """Get OAuth credentials for user authentication."""
+        creds = None
+        
+        # Check if we have saved token
+        if os.path.exists(self.TOKEN_FILE):
             try:
-                info = json.loads(self._service_account_file)
-                return service_account.Credentials.from_service_account_info(
-                    info,
-                    scopes=self.SCOPES
+                creds = Credentials.from_authorized_user_file(self.TOKEN_FILE, self.SCOPES)
+            except Exception as e:
+                logger.warning(f"Failed to load token file: {e}")
+                creds = None
+        
+        # If no valid credentials, authenticate
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except Exception as e:
+                    logger.warning(f"Failed to refresh token: {e}")
+                    creds = None
+            
+            if not creds:
+                if not os.path.exists(self._oauth_client_secret_file):
+                    raise FileNotFoundError(
+                        f"OAuth client secret file not found: {self._oauth_client_secret_file}. "
+                        f"Please download it from Google Cloud Console."
+                    )
+                
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self._oauth_client_secret_file,
+                    self.SCOPES
                 )
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse service account JSON: {e}")
-                raise
-        else:
-            # It's a file path
-            return service_account.Credentials.from_service_account_file(
-                self._service_account_file,
-                scopes=self.SCOPES
-            )
+                creds = flow.run_local_server(port=0)
+                
+                # Save token for next time
+                with open(self.TOKEN_FILE, 'w') as token:
+                    token.write(creds.to_json())
+                logger.info(f"OAuth token saved to {self.TOKEN_FILE}")
+        
+        return creds
     
     def _get_service(self):
-        """Get or create the Drive service."""
-        if self._service is None:
-            credentials = self._get_credentials()
-            self._service = build('drive', 'v3', credentials=credentials)
-        return self._service
+        """Get Drive service using OAuth."""
+        if self._oauth_service is None:
+            credentials = self._get_oauth_credentials()
+            self._oauth_service = build('drive', 'v3', credentials=credentials)
+        return self._oauth_service
     
     async def upload_file(
         self,
@@ -66,7 +102,7 @@ class GoogleDriveAdapter:
         folder_id: Optional[str] = None,
     ) -> str:
         """
-        Upload a file to Google Drive.
+        Upload a file to Google Drive using OAuth.
         
         Args:
             file_path: Local path to the file
@@ -112,7 +148,7 @@ class GoogleDriveAdapter:
         folder_id: Optional[str] = None,
     ) -> str:
         """
-        Upload file bytes to Google Drive.
+        Upload file bytes to Google Drive using OAuth.
         
         Args:
             file_bytes: File content as bytes
@@ -204,35 +240,33 @@ class GoogleDriveAdapter:
     
     async def create_folder(self, name: str, parent_id: Optional[str] = None) -> str:
         """
-        Create a folder in Google Drive.
+        Create a folder in Google Drive using OAuth.
         
         Args:
             name: Folder name
-            parent_id: Parent folder ID
+            parent_id: Parent folder ID (defaults to configured folder)
             
         Returns:
             Created folder ID
         """
         try:
             service = self._get_service()
+            parent = parent_id or self._folder_id
             
             file_metadata = {
                 'name': name,
-                'mimeType': 'application/vnd.google-apps.folder'
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [parent] if parent else []
             }
-            
-            if parent_id:
-                file_metadata['parents'] = [parent_id]
-            elif self._folder_id:
-                file_metadata['parents'] = [self._folder_id]
             
             folder = service.files().create(
                 body=file_metadata,
                 fields='id'
             ).execute()
             
-            logger.info(f"Created folder {name}: {folder['id']}")
-            return folder['id']
+            folder_id = folder['id']
+            logger.info(f"Created folder {name}: {folder_id}")
+            return folder_id
             
         except Exception as e:
             logger.error(f"Failed to create folder: {e}")
