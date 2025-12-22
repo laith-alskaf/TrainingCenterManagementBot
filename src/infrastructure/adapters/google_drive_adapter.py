@@ -69,16 +69,46 @@ class GoogleDriveAdapter:
                     creds = None
             
             if not creds:
-                if not os.path.exists(self._oauth_client_secret_file):
-                    raise FileNotFoundError(
-                        f"OAuth client secret file not found: {self._oauth_client_secret_file}. "
-                        f"Please download it from Google Cloud Console."
+                # Check if it's JSON content (starts with {)
+                if self._oauth_client_secret_file.strip().startswith('{'):
+                    # Parse JSON content directly
+                    try:
+                        import json
+                        import tempfile
+                        client_config = json.loads(self._oauth_client_secret_file)
+                        
+                        # Create a temporary file for InstalledAppFlow
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                            json.dump(client_config, temp_file)
+                            temp_path = temp_file.name
+                        
+                        flow = InstalledAppFlow.from_client_secrets_file(
+                            temp_path,
+                            self.SCOPES
+                        )
+                        
+                        # Clean up temp file
+                        try:
+                            os.unlink(temp_path)
+                        except:
+                            pass
+                            
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse OAuth client secret JSON: {e}")
+                        raise
+                else:
+                    # It's a file path
+                    if not os.path.exists(self._oauth_client_secret_file):
+                        raise FileNotFoundError(
+                            f"OAuth client secret file not found: {self._oauth_client_secret_file}. "
+                            f"Please download it from Google Cloud Console."
+                        )
+                    
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        self._oauth_client_secret_file,
+                        self.SCOPES
                     )
                 
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self._oauth_client_secret_file,
-                    self.SCOPES
-                )
                 creds = flow.run_local_server(port=0)
                 
                 # Save token for next time

@@ -66,6 +66,11 @@ from infrastructure.telegram.handlers.admin_student_viewer_handler import (
     handle_search_input,
     STUDENT_VIEWER_PREFIX,
 )
+from infrastructure.telegram.handlers.admin_course_handler import (
+    handle_course_manager_callback,
+    handle_edit_input as handle_course_edit_input,
+    COURSE_MGR_PREFIX,
+)
 from infrastructure.telegram.handlers.base import log_handler
 from domain.entities import Language, Platform, ScheduledPost
 from domain.value_objects import now_syria
@@ -288,6 +293,10 @@ Click the button below to start:
     async def admin_student_viewer_callback(update: Update, context):
         await handle_student_viewer_callback(update, context, container)
     
+    # Course manager callback handler
+    async def course_manager_callback(update: Update, context):
+        await handle_course_manager_callback(update, context, container)
+    
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern="^admin_"))
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern=f"^{COURSE_CREATE_PREFIX}"))
     application.add_handler(CallbackQueryHandler(enhanced_admin_callback, pattern=f"^{UPLOAD_SELECT_PREFIX}"))
@@ -297,6 +306,7 @@ Click the button below to start:
     application.add_handler(CallbackQueryHandler(student_registration_callback, pattern=f"^{REG_PREFIX}"))
     application.add_handler(CallbackQueryHandler(student_profile_callback, pattern=f"^{PROFILE_PREFIX}"))
     application.add_handler(CallbackQueryHandler(admin_student_viewer_callback, pattern=f"^{STUDENT_VIEWER_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(course_manager_callback, pattern=f"^{COURSE_MGR_PREFIX}"))
     
     # Text message handler for registration, course creation, and admin actions
     async def handle_text_input(update: Update, context):
@@ -322,6 +332,10 @@ Click the button below to start:
         
         # Notification content input
         if await handle_notification_content_input(update, context):
+            return
+        
+        # Course edit text input
+        if await handle_course_edit_input(update, context, container):
             return
         
         # Course creation flow (priority)
@@ -475,6 +489,57 @@ Choose the platform to publish on:
             )
             if handled:
                 return
+        
+        # Course-specific file upload
+        if context.user_data.get('file_upload'):
+            if not config.telegram.is_admin(user_id):
+                return
+            
+            upload_info = context.user_data.get('file_upload')
+            course_id = upload_info.get('course_id')
+            folder_id = upload_info.get('folder_id')
+            
+            context.user_data.pop('file_upload', None)
+            
+            if not update.message.document:
+                error = "❌ يرجى إرسال ملف" if lang == Language.ARABIC else "❌ Please send a file"
+                await update.message.reply_text(error)
+                return
+            
+            uploading = "📤 جاري الرفع..." if lang == Language.ARABIC else "📤 Uploading..."
+            await update.message.reply_text(uploading)
+            
+            try:
+                doc = update.message.document
+                file = await context.bot.get_file(doc.file_id)
+                file_bytes = await file.download_as_bytearray()
+                
+                link = await container.drive_adapter.upload_file_bytes(
+                    file_bytes=bytes(file_bytes),
+                    file_name=doc.file_name or "uploaded_file",
+                    mime_type=doc.mime_type or "application/octet-stream",
+                    folder_id=folder_id,
+                )
+                
+                if lang == Language.ARABIC:
+                    message = f"✅ تم رفع الملف بنجاح!\n\n🔗 الرابط:\n{link}"
+                else:
+                    message = f"✅ File uploaded successfully!\n\n🔗 Link:\n{link}"
+            except Exception as e:
+                if lang == Language.ARABIC:
+                    message = f"❌ فشل الرفع: {e}"
+                else:
+                    message = f"❌ Upload failed: {e}"
+            
+            from infrastructure.telegram.handlers.ui_components import KeyboardBuilder
+            builder = KeyboardBuilder()
+            builder.add_button_row(
+                f"📁 " + ("الملفات" if lang == Language.ARABIC else "Files"),
+                f"{COURSE_MGR_PREFIX}files_{course_id}"
+            )
+            
+            await update.message.reply_text(message, reply_markup=builder.build(), disable_web_page_preview=True)
+            return
         
         # General file upload
         if context.user_data.get('awaiting_file'):

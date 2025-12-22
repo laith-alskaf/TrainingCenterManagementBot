@@ -99,6 +99,12 @@ def get_admin_panel_keyboard(lang: Language) -> InlineKeyboardMarkup:
         "stdview_menu"
     )
     
+    # Course management
+    builder.add_button_row(
+        f"📚 " + ("إدارة الدورات" if lang == Language.ARABIC else "Course Management"),
+        "cmgr_list"
+    )
+    
     # Targeted notification
     builder.add_button_row(
         f"📢 " + ("إرسال إشعار" if lang == Language.ARABIC else "Send Notification"),
