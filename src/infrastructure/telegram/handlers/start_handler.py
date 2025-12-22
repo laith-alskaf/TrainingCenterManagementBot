@@ -32,7 +32,24 @@ def get_main_menu_keyboard(lang: Language, is_admin_user: bool = False) -> Inlin
     """Create the main menu keyboard with beautiful buttons."""
     builder = KeyboardBuilder()
     
-    # Main navigation buttons
+    # For admins: show only admin panel
+    if is_admin_user:
+        builder.add_button_row(
+            f"{Emoji.ADMIN} " + ("لوحة الإدارة" if lang == Language.ARABIC else "Admin Panel"),
+            f"{ADMIN_PREFIX}panel"
+        )
+        builder.add_button(
+            f"{Emoji.LANGUAGE} " + ("اللغة" if lang == Language.ARABIC else "Language"),
+            f"{NAV_PREFIX}language"
+        )
+        builder.add_button(
+            f"{Emoji.HELP} " + ("مساعدة" if lang == Language.ARABIC else "Help"),
+            f"{NAV_PREFIX}help"
+        )
+        builder.add_row()
+        return builder.build()
+    
+    # For students: show student navigation
     builder.add_button_row(
         f"{Emoji.COURSES} " + ("الدورات المتاحة" if lang == Language.ARABIC else "Available Courses"),
         f"{NAV_PREFIX}courses"
@@ -56,13 +73,6 @@ def get_main_menu_keyboard(lang: Language, is_admin_user: bool = False) -> Inlin
         f"{NAV_PREFIX}help"
     )
     builder.add_row()
-    
-    # Admin panel for admins
-    if is_admin_user:
-        builder.add_button_row(
-            f"{Emoji.ADMIN} " + ("لوحة الإدارة" if lang == Language.ARABIC else "Admin Panel"),
-            f"{ADMIN_PREFIX}panel"
-        )
     
     return builder.build()
 

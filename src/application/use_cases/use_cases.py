@@ -180,9 +180,9 @@ class RegisterStudentUseCase:
         if student is None:
             student = Student.create(
                 telegram_id=telegram_id,
-                name=name,
+                full_name=name,
+                phone_number=phone or "",
                 now=now,
-                phone=phone,
                 email=email,
             )
             await self._student_repo.save(student)
