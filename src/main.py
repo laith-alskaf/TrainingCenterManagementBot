@@ -59,6 +59,10 @@ from infrastructure.telegram.handlers.student_profile_handler import (
     start_profile_flow,
     check_profile_complete,
     show_profile_required_message,
+    show_student_profile,
+    handle_profile_edit_callback,
+    handle_profile_edit_text,
+    handle_profile_view_callback,
     PROFILE_PREFIX,
 )
 from infrastructure.telegram.handlers.admin_student_viewer_handler import (
@@ -289,6 +293,13 @@ Click the button below to start:
     async def student_profile_callback(update: Update, context):
         await handle_profile_callback(update, context, container)
     
+    # Profile view callback handler
+    async def profile_view_callback(update: Update, context):
+        if await handle_profile_view_callback(update, context, container):
+            return
+        # Also handle edit callbacks
+        await handle_profile_edit_callback(update, context, container)
+    
     # Admin student viewer callback handler
     async def admin_student_viewer_callback(update: Update, context):
         await handle_student_viewer_callback(update, context, container)
@@ -316,6 +327,10 @@ Click the button below to start:
         
         # Student profile flow (with validation)
         if await handle_profile_text_input(update, context):
+            return
+        
+        # Profile edit flow (name, phone, residence changes)
+        if await handle_profile_edit_text(update, context, container):
             return
         
         # Student registration flow (with phone validation)
@@ -644,6 +659,7 @@ Choose the platform to publish on:
         await query.edit_message_text(message)
     
     application.add_handler(CallbackQueryHandler(handle_post_platform, pattern="^postplat_"))
+    application.add_handler(CallbackQueryHandler(profile_view_callback, pattern="^profile_view$|^profile_edit_"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_file_input))
     
@@ -707,6 +723,9 @@ async def main() -> None:
     
     _container = await create_container()
     application = Application.builder().token(config.telegram.bot_token).build()
+    
+    # Store WhatsApp adapter in bot_data for handlers to access
+    application.bot_data['whatsapp_adapter'] = _container.whatsapp_adapter
     
     setup_handlers(application, _container)
     setup_scheduler(application, _container)

@@ -49,6 +49,15 @@ class MetaConfig:
 
 
 @dataclass(frozen=True)
+class WhatsAppConfig:
+    """WhatsApp Cloud API configuration."""
+    phone_number_id: str
+    access_token: str
+    otp_template_name: str = "otp_verification"
+    payment_reminder_template: str = "payment_reminder"
+
+
+@dataclass(frozen=True)
 class SchedulerConfig:
     """Scheduler configuration."""
     check_interval_minutes: int
@@ -62,6 +71,7 @@ class Config:
     mongodb: MongoDBConfig
     google: GoogleConfig
     meta: MetaConfig
+    whatsapp: WhatsAppConfig
     scheduler: SchedulerConfig
     timezone: pytz.BaseTzInfo = field(init=False)
     
@@ -100,6 +110,12 @@ def load_config() -> Config:
             access_token=os.getenv("META_ACCESS_TOKEN", ""),
             facebook_page_id=os.getenv("FACEBOOK_PAGE_ID", ""),
             instagram_account_id=os.getenv("INSTAGRAM_ACCOUNT_ID", ""),
+        ),
+        whatsapp=WhatsAppConfig(
+            phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", ""),
+            access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", ""),
+            otp_template_name=os.getenv("WHATSAPP_OTP_TEMPLATE", "otp_verification"),
+            payment_reminder_template=os.getenv("WHATSAPP_PAYMENT_TEMPLATE", "payment_reminder"),
         ),
         scheduler=SchedulerConfig(
             check_interval_minutes=int(os.getenv("POST_CHECK_INTERVAL_MINUTES", "5")),

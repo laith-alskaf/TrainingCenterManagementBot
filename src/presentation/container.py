@@ -20,6 +20,7 @@ from infrastructure.adapters import (
     GoogleDriveAdapter,
     GoogleSheetsAdapter,
     MetaGraphAdapter,
+    WhatsAppAdapter,
 )
 from infrastructure.scheduler import PostScheduler
 from application.use_cases import (
@@ -78,6 +79,7 @@ class Container:
     drive_adapter: GoogleDriveAdapter
     sheets_adapter: GoogleSheetsAdapter
     meta_adapter: MetaGraphAdapter
+    whatsapp_adapter: Optional[WhatsAppAdapter]  # Optional - requires WhatsApp config
     
     # Use Cases - Courses
     get_courses: GetCoursesUseCase
@@ -170,6 +172,18 @@ async def create_container(app_config: Optional[Config] = None) -> Container:
         instagram_account_id=app_config.meta.instagram_account_id,
     )
     
+    # Create WhatsApp adapter (optional - only if configured)
+    whatsapp_adapter = None
+    if app_config.whatsapp.phone_number_id and app_config.whatsapp.access_token:
+        whatsapp_adapter = WhatsAppAdapter(
+            phone_number_id=app_config.whatsapp.phone_number_id,
+            access_token=app_config.whatsapp.access_token,
+            otp_template_name=app_config.whatsapp.otp_template_name,
+        )
+        logger.info("WhatsApp adapter initialized")
+    else:
+        logger.warning("WhatsApp adapter not configured - OTP verification disabled")
+    
     # Create use cases - Courses
     get_courses = GetCoursesUseCase(course_repo)
     get_course_by_id = GetCourseByIdUseCase(course_repo)
@@ -231,6 +245,7 @@ async def create_container(app_config: Optional[Config] = None) -> Container:
         drive_adapter=drive_adapter,
         sheets_adapter=sheets_adapter,
         meta_adapter=meta_adapter,
+        whatsapp_adapter=whatsapp_adapter,
         # Use Cases - Courses
         get_courses=get_courses,
         get_course_by_id=get_course_by_id,

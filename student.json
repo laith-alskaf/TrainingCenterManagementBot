@@ -1,0 +1,176 @@
+{
+    "name": "Student Registration",
+    "nodes": [
+        {
+            "name": "Start",
+            "type": "n8n-nodes-base.executeWorkflowTrigger",
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "name": "Check Existing Student",
+            "type": "n8n-nodes-base.mongoDb",
+            "parameters": {
+                "operation": "find",
+                "collection": "students",
+                "query": "{\"telegram_id\": {{ $json.userId }}}"
+            },
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "name": "Is New Student?",
+            "type": "n8n-nodes-base.if",
+            "parameters": {
+                "conditions": {
+                    "conditions": [
+                        {
+                            "leftValue": "={{ $json.length }}",
+                            "rightValue": 0,
+                            "operator": {
+                                "type": "number",
+                                "operation": "equals"
+                            }
+                        }
+                    ]
+                }
+            },
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "name": "Get Course Details",
+            "type": "n8n-nodes-base.mongoDb",
+            "parameters": {
+                "operation": "find",
+                "collection": "courses",
+                "query": "{\"_id\": \"{{ $json.courseId }}\"}"
+            },
+            "position": [
+                850,
+                200
+            ]
+        },
+        {
+            "name": "Create Registration",
+            "type": "n8n-nodes-base.mongoDb",
+            "parameters": {
+                "operation": "insert",
+                "collection": "registrations",
+                "fields": {
+                    "student_id": "={{ $json.userId }}",
+                    "course_id": "={{ $json.courseId }}",
+                    "status": "pending",
+                    "created_at": "={{ $now.toISO() }}"
+                }
+            },
+            "position": [
+                1050,
+                200
+            ]
+        },
+        {
+            "name": "Notify Admin",
+            "type": "n8n-nodes-base.telegram",
+            "parameters": {
+                "operation": "sendMessage",
+                "chatId": "={{ $vars.ADMIN_CHAT_ID }}",
+                "text": "📝 طلب تسجيل جديد\n\nالطالب: {{ $json.studentName }}\nالدورة: {{ $json.courseName }}\n\nهل توافق؟",
+                "additionalFields": {
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "✅ قبول",
+                                    "callback_data": "approve_{{ $json.registrationId }}"
+                                },
+                                {
+                                    "text": "❌ رفض",
+                                    "callback_data": "reject_{{ $json.registrationId }}"
+                                }
+                            ]
+                        ]
+                    }
+                }
+            },
+            "position": [
+                1250,
+                200
+            ]
+        },
+        {
+            "name": "Send Confirmation",
+            "type": "n8n-nodes-base.telegram",
+            "parameters": {
+                "operation": "sendMessage",
+                "chatId": "={{ $json.chatId }}",
+                "text": "✅ تم استلام طلب تسجيلك في {{ $json.courseName }}\n\nسيتم مراجعته من قبل الإدارة."
+            },
+            "position": [
+                1450,
+                200
+            ]
+        }
+    ],
+    "connections": {
+        "Start": {
+            "main": [
+                [
+                    {
+                        "node": "Check Existing Student"
+                    }
+                ]
+            ]
+        },
+        "Check Existing Student": {
+            "main": [
+                [
+                    {
+                        "node": "Is New Student?"
+                    }
+                ]
+            ]
+        },
+        "Is New Student?": {
+            "main": [
+                [
+                    {
+                        "node": "Get Course Details"
+                    }
+                ],
+                [
+                    {
+                        "node": "Send Already Registered"
+                    }
+                ]
+            ]
+        },
+        "Get Course Details": {
+            "main": [
+                [
+                    {
+                        "node": "Create Registration"
+                    }
+                ]
+            ]
+        },
+        "Create Registration": {
+            "main": [
+                [
+                    {
+                        "node": "Notify Admin"
+                    },
+                    {
+                        "node": "Send Confirmation"
+                    }
+                ]
+            ]
+        }
+    }
+}

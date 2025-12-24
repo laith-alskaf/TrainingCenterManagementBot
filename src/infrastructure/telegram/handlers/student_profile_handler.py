@@ -24,6 +24,7 @@ PROFILE_PREFIX = "profile_"
 class ProfileStep:
     FULL_NAME = "full_name"
     PHONE = "phone"
+    OTP_VERIFY = "otp_verify"  # WhatsApp OTP verification
     GENDER = "gender"
     AGE = "age"
     RESIDENCE = "residence"
@@ -36,6 +37,7 @@ class ProfileStep:
 STEP_ORDER = [
     ProfileStep.FULL_NAME,
     ProfileStep.PHONE,
+    ProfileStep.OTP_VERIFY,
     ProfileStep.GENDER,
     ProfileStep.AGE,
     ProfileStep.RESIDENCE,
@@ -111,6 +113,28 @@ def get_gender_keyboard(lang: Language) -> InlineKeyboardMarkup:
     builder.add_button(
         "👩 " + ("أنثى" if lang == Language.ARABIC else "Female"),
         f"{PROFILE_PREFIX}gender_female"
+    )
+    builder.add_row()
+    
+    builder.add_button_row(
+        f"❌ " + ("إلغاء" if lang == Language.ARABIC else "Cancel"),
+        f"{PROFILE_PREFIX}cancel"
+    )
+    
+    return builder.build()
+
+
+def get_otp_keyboard(lang: Language) -> InlineKeyboardMarkup:
+    """Get OTP verification keyboard with resend and change phone options."""
+    builder = KeyboardBuilder()
+    
+    builder.add_button(
+        "🔄 " + ("إعادة إرسال" if lang == Language.ARABIC else "Resend"),
+        f"{PROFILE_PREFIX}otp_resend"
+    )
+    builder.add_button(
+        "📱 " + ("تغيير الرقم" if lang == Language.ARABIC else "Change Phone"),
+        f"{PROFILE_PREFIX}otp_change_phone"
     )
     builder.add_row()
     
@@ -256,6 +280,39 @@ def get_step_message(step: str, lang: Language, profile_data: dict = None) -> st
 • `+963912345678` ← with country code
 
 📌 *Example:* `0991234567`
+"""
+    
+    elif step == ProfileStep.OTP_VERIFY:
+        masked_phone = profile_data.get('phone_number', '')[:4] + "****" + profile_data.get('phone_number', '')[-3:] if profile_data else "***"
+        if lang == Language.ARABIC:
+            return f"""
+📝 *إكمال الملف الشخصي*
+{divider()}
+
+{progress}
+
+📱 *تم إرسال رمز التحقق عبر واتساب*
+
+الرقم: `{masked_phone}`
+
+✏️ *أدخل رمز التحقق المكون من 6 أرقام:*
+
+⚠️ الرمز صالح لمدة 5 دقائق
+"""
+        else:
+            return f"""
+📝 *Complete Your Profile*
+{divider()}
+
+{progress}
+
+📱 *Verification code sent via WhatsApp*
+
+Phone: `{masked_phone}`
+
+✏️ *Enter the 6-digit verification code:*
+
+⚠️ Code expires in 5 minutes
 """
     
     elif step == ProfileStep.GENDER:
@@ -500,7 +557,7 @@ async def handle_profile_text_input(
         return False
     
     step = flow.get('step')
-    if step not in [ProfileStep.FULL_NAME, ProfileStep.PHONE, ProfileStep.AGE,
+    if step not in [ProfileStep.FULL_NAME, ProfileStep.PHONE, ProfileStep.OTP_VERIFY, ProfileStep.AGE,
                     ProfileStep.RESIDENCE, ProfileStep.SPECIALIZATION]:
         return False
     
@@ -541,12 +598,81 @@ async def handle_profile_text_input(
                     parse_mode='Markdown'
                 )
             return True
+        
         flow['data']['phone_number'] = normalized
-        # Move to gender
-        flow['step'] = ProfileStep.GENDER
-        message = get_step_message(ProfileStep.GENDER, lang)
-        keyboard = get_gender_keyboard(lang)
-        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        flow['data']['phone_pending_verification'] = normalized
+        
+        # Send OTP via WhatsApp (container passed via context)
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            user_id = update.effective_user.id
+            success, otp_message = await whatsapp_adapter.send_otp(user_id, normalized)
+            
+            if success:
+                # Move to OTP verification
+                flow['step'] = ProfileStep.OTP_VERIFY
+                context.user_data['profile_flow'] = flow
+                message = get_step_message(ProfileStep.OTP_VERIFY, lang, flow['data'])
+                keyboard = get_otp_keyboard(lang)
+                await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+            else:
+                # OTP send failed
+                await update.message.reply_text(
+                    f"❌ {otp_message}\n\n" + 
+                    ("حاول مرة أخرى أو تأكد من صحة الرقم." if lang == Language.ARABIC else "Please try again or verify the phone number."),
+                    parse_mode='Markdown'
+                )
+        else:
+            # WhatsApp adapter not configured, skip OTP verification
+            flow['step'] = ProfileStep.GENDER
+            context.user_data['profile_flow'] = flow
+            flow['data']['phone_verified'] = False  # Mark as unverified
+            message = get_step_message(ProfileStep.GENDER, lang)
+            keyboard = get_gender_keyboard(lang)
+            await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    
+    elif step == ProfileStep.OTP_VERIFY:
+        # Validate OTP code
+        if not text.isdigit() or len(text) != 6:
+            if lang == Language.ARABIC:
+                await update.message.reply_text("❌ الرمز يجب أن يكون 6 أرقام")
+            else:
+                await update.message.reply_text("❌ Code must be 6 digits")
+            return True
+        
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            user_id = update.effective_user.id
+            success, verify_message = whatsapp_adapter.verify_otp(user_id, text)
+            
+            if success:
+                # OTP verified, move to gender
+                flow['data']['phone_verified'] = True
+                flow['step'] = ProfileStep.GENDER
+                context.user_data['profile_flow'] = flow
+                
+                # Clear OTP data
+                whatsapp_adapter.clear_otp(user_id)
+                
+                if lang == Language.ARABIC:
+                    await update.message.reply_text("✅ تم التحقق من رقم الهاتف بنجاح!")
+                else:
+                    await update.message.reply_text("✅ Phone number verified successfully!")
+                
+                message = get_step_message(ProfileStep.GENDER, lang)
+                keyboard = get_gender_keyboard(lang)
+                await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+            else:
+                # OTP verification failed
+                await update.message.reply_text(verify_message)
+        else:
+            # No adapter, skip
+            flow['step'] = ProfileStep.GENDER
+            context.user_data['profile_flow'] = flow
+            message = get_step_message(ProfileStep.GENDER, lang)
+            keyboard = get_gender_keyboard(lang)
+            await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
         return True
     
     elif step == ProfileStep.AGE:
@@ -615,12 +741,61 @@ async def handle_profile_callback(
     elif data == "cancel":
         await query.answer()
         context.user_data.pop('profile_flow', None)
+        # Clear any OTP data
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            whatsapp_adapter.clear_otp(update.effective_user.id)
         if lang == Language.ARABIC:
             message = "❌ تم إلغاء إكمال الملف الشخصي"
         else:
             message = "❌ Profile completion cancelled"
         keyboard = get_home_keyboard(lang)
         await query.edit_message_text(message, reply_markup=keyboard)
+        return True
+    
+    # OTP resend
+    elif data == "otp_resend":
+        await query.answer()
+        phone = flow.get('data', {}).get('phone_pending_verification', '')
+        if not phone:
+            if lang == Language.ARABIC:
+                await query.edit_message_text("❌ حدث خطأ. أعد إدخال رقم الهاتف.")
+            else:
+                await query.edit_message_text("❌ Error. Please re-enter phone number.")
+            return True
+        
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            user_id = update.effective_user.id
+            success, otp_message = await whatsapp_adapter.send_otp(user_id, phone)
+            
+            if success:
+                message = get_step_message(ProfileStep.OTP_VERIFY, lang, flow['data'])
+                keyboard = get_otp_keyboard(lang)
+                if lang == Language.ARABIC:
+                    await query.answer("✅ تم إعادة إرسال الرمز", show_alert=True)
+                else:
+                    await query.answer("✅ Code resent", show_alert=True)
+                await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+            else:
+                await query.answer(otp_message, show_alert=True)
+        return True
+    
+    # OTP change phone
+    elif data == "otp_change_phone":
+        await query.answer()
+        # Clear OTP and go back to phone step
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            whatsapp_adapter.clear_otp(update.effective_user.id)
+        
+        flow['step'] = ProfileStep.PHONE
+        flow['data'].pop('phone_pending_verification', None)
+        context.user_data['profile_flow'] = flow
+        
+        message = get_step_message(ProfileStep.PHONE, lang)
+        keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}cancel")
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
         return True
     
     # Gender selection
@@ -791,3 +966,353 @@ Click the button below to start:
         await query.edit_message_text(message, parse_mode='Markdown', reply_markup=builder.build())
     else:
         await update.message.reply_text(message, parse_mode='Markdown', reply_markup=builder.build())
+
+
+async def show_student_profile(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    container,
+) -> None:
+    """Show student's profile information with edit option."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    lang = get_user_language(context)
+    user_id = update.effective_user.id
+    student = await container.student_repo.get_by_telegram_id(user_id)
+    
+    if not student:
+        if lang == Language.ARABIC:
+            message = "❌ لم يتم العثور على ملفك الشخصي."
+        else:
+            message = "❌ Profile not found."
+        if query:
+            await query.edit_message_text(message)
+        else:
+            await update.message.reply_text(message)
+        return
+    
+    # Format profile info
+    gender_ar = "ذكر" if student.gender == Gender.MALE else "أنثى"
+    gender_en = "Male" if student.gender == Gender.MALE else "Female"
+    
+    edu_labels = {
+        EducationLevel.MIDDLE_SCHOOL: ("إعدادي", "Middle School"),
+        EducationLevel.HIGH_SCHOOL: ("ثانوي", "High School"),
+        EducationLevel.DIPLOMA: ("معهد", "Diploma"),
+        EducationLevel.BACHELOR: ("بكالوريوس", "Bachelor"),
+        EducationLevel.MASTER: ("ماجستير", "Master"),
+        EducationLevel.PHD: ("دكتوراه", "PhD"),
+        EducationLevel.OTHER: ("أخرى", "Other"),
+    }
+    edu_ar, edu_en = edu_labels.get(student.education_level, ("أخرى", "Other"))
+    
+    phone_verified = getattr(student, 'phone_verified', False)
+    verified_badge = " ✅" if phone_verified else " ⚠️"
+    
+    if lang == Language.ARABIC:
+        spec_line = f"📚 *الاختصاص:* {student.specialization}\n" if student.specialization else ""
+        message = f"""
+👤 *ملفك الشخصي*
+{divider()}
+
+👤 *الاسم:* {student.full_name}
+📱 *الهاتف:* {student.phone_number}{verified_badge}
+👤 *الجنس:* {gender_ar}
+🎂 *العمر:* {student.age} سنة
+🏠 *الإقامة:* {student.residence}
+🎓 *التحصيل:* {edu_ar}
+{spec_line}
+{divider()}
+
+{"✅ تم التحقق من رقم الهاتف" if phone_verified else "⚠️ رقم الهاتف غير موثق"}
+"""
+    else:
+        spec_line = f"📚 *Specialization:* {student.specialization}\n" if student.specialization else ""
+        message = f"""
+👤 *Your Profile*
+{divider()}
+
+👤 *Name:* {student.full_name}
+📱 *Phone:* {student.phone_number}{verified_badge}
+👤 *Gender:* {gender_en}
+🎂 *Age:* {student.age} years
+🏠 *Residence:* {student.residence}
+🎓 *Education:* {edu_en}
+{spec_line}
+{divider()}
+
+{"✅ Phone number verified" if phone_verified else "⚠️ Phone number not verified"}
+"""
+    
+    builder = KeyboardBuilder()
+    
+    # Edit buttons
+    builder.add_button(
+        "✏️ " + ("تعديل الاسم" if lang == Language.ARABIC else "Edit Name"),
+        f"{PROFILE_PREFIX}edit_name"
+    )
+    builder.add_button(
+        "📱 " + ("تعديل الهاتف" if lang == Language.ARABIC else "Edit Phone"),
+        f"{PROFILE_PREFIX}edit_phone"
+    )
+    builder.add_row()
+    
+    builder.add_button(
+        "🏠 " + ("تعديل الإقامة" if lang == Language.ARABIC else "Edit Residence"),
+        f"{PROFILE_PREFIX}edit_residence"
+    )
+    builder.add_button(
+        "🎓 " + ("تعديل التحصيل" if lang == Language.ARABIC else "Edit Education"),
+        f"{PROFILE_PREFIX}edit_education"
+    )
+    builder.add_row()
+    
+    builder.add_button_row(
+        "🏠 " + ("القائمة الرئيسية" if lang == Language.ARABIC else "Main Menu"),
+        "home"
+    )
+    
+    if query:
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=builder.build())
+    else:
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=builder.build())
+
+
+async def handle_profile_edit_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    container,
+) -> bool:
+    """Handle profile edit callbacks."""
+    query = update.callback_query
+    if not query or not query.data.startswith(f"{PROFILE_PREFIX}edit_"):
+        return False
+    
+    await query.answer()
+    data = query.data.replace(f"{PROFILE_PREFIX}edit_", "")
+    lang = get_user_language(context)
+    user_id = update.effective_user.id
+    
+    # Set edit mode
+    context.user_data['profile_edit'] = {'field': data}
+    
+    if data == "name":
+        if lang == Language.ARABIC:
+            message = """
+✏️ *تعديل الاسم*
+
+أدخل اسمك الثلاثي الجديد:
+
+📌 *مثال:* `أحمد محمد العلي`
+"""
+        else:
+            message = """
+✏️ *Edit Name*
+
+Enter your new full name:
+
+📌 *Example:* `Ahmed Mohammed Ali`
+"""
+    elif data == "phone":
+        if lang == Language.ARABIC:
+            message = """
+✏️ *تعديل رقم الهاتف*
+
+أدخل رقم الهاتف الجديد:
+
+📌 *مثال:* `0991234567`
+
+⚠️ سيتطلب تحقق جديد عبر واتساب
+"""
+        else:
+            message = """
+✏️ *Edit Phone Number*
+
+Enter your new phone number:
+
+📌 *Example:* `0991234567`
+
+⚠️ Will require new WhatsApp verification
+"""
+    elif data == "residence":
+        if lang == Language.ARABIC:
+            message = """
+✏️ *تعديل مكان الإقامة*
+
+أدخل مكان إقامتك الجديد:
+
+📌 *مثال:* `دمشق - المزة`
+"""
+        else:
+            message = """
+✏️ *Edit Residence*
+
+Enter your new residence:
+
+📌 *Example:* `Damascus - Mazzeh`
+"""
+    elif data == "education":
+        # Show education keyboard
+        message = "🎓 " + ("اختر مستواك الدراسي الجديد:" if lang == Language.ARABIC else "Select your new education level:")
+        keyboard = get_education_keyboard(lang)
+        context.user_data['profile_edit'] = {'field': 'education_select'}
+        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        return True
+    else:
+        return False
+    
+    keyboard = get_cancel_keyboard(lang, f"{PROFILE_PREFIX}view")
+    await query.edit_message_text(message, parse_mode='Markdown', reply_markup=keyboard)
+    return True
+
+
+async def handle_profile_edit_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    container,
+) -> bool:
+    """Handle text input for profile editing."""
+    edit_data = context.user_data.get('profile_edit')
+    if not edit_data:
+        return False
+    
+    field = edit_data.get('field')
+    if not field:
+        return False
+    
+    lang = get_user_language(context)
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+    student = await container.student_repo.get_by_telegram_id(user_id)
+    
+    if not student:
+        return False
+    
+    if field == "name":
+        is_valid, value, error = validate_full_name(text, lang)
+        if not is_valid:
+            await update.message.reply_text(error)
+            return True
+        student.full_name = value
+        student.updated_at = now_syria()
+        await container.student_repo.save(student)
+        context.user_data.pop('profile_edit', None)
+        
+        if lang == Language.ARABIC:
+            await update.message.reply_text("✅ تم تحديث الاسم بنجاح!")
+        else:
+            await update.message.reply_text("✅ Name updated successfully!")
+        
+        # Show updated profile
+        await show_student_profile(update, context, container)
+        return True
+    
+    elif field == "phone":
+        is_valid, normalized, error = validate_syrian_phone(text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {error}")
+            return True
+        
+        # Send OTP for verification
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            success, otp_message = await whatsapp_adapter.send_otp(user_id, normalized)
+            if success:
+                context.user_data['profile_edit'] = {
+                    'field': 'phone_otp',
+                    'new_phone': normalized
+                }
+                
+                masked_phone = normalized[:4] + "****" + normalized[-3:]
+                if lang == Language.ARABIC:
+                    await update.message.reply_text(
+                        f"📱 تم إرسال رمز التحقق إلى {masked_phone}\n\n"
+                        "أدخل الرمز المكون من 6 أرقام:"
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"📱 Verification code sent to {masked_phone}\n\n"
+                        "Enter the 6-digit code:"
+                    )
+            else:
+                await update.message.reply_text(f"❌ {otp_message}")
+        else:
+            # No WhatsApp, update directly
+            student.phone_number = normalized
+            student.updated_at = now_syria()
+            await container.student_repo.save(student)
+            context.user_data.pop('profile_edit', None)
+            
+            if lang == Language.ARABIC:
+                await update.message.reply_text("✅ تم تحديث رقم الهاتف!")
+            else:
+                await update.message.reply_text("✅ Phone number updated!")
+            
+            await show_student_profile(update, context, container)
+        return True
+    
+    elif field == "phone_otp":
+        new_phone = edit_data.get('new_phone', '')
+        if not text.isdigit() or len(text) != 6:
+            if lang == Language.ARABIC:
+                await update.message.reply_text("❌ الرمز يجب أن يكون 6 أرقام")
+            else:
+                await update.message.reply_text("❌ Code must be 6 digits")
+            return True
+        
+        whatsapp_adapter = context.bot_data.get('whatsapp_adapter')
+        if whatsapp_adapter:
+            success, verify_message = whatsapp_adapter.verify_otp(user_id, text)
+            if success:
+                student.phone_number = new_phone
+                student.updated_at = now_syria()
+                await container.student_repo.save(student)
+                whatsapp_adapter.clear_otp(user_id)
+                context.user_data.pop('profile_edit', None)
+                
+                if lang == Language.ARABIC:
+                    await update.message.reply_text("✅ تم تحديث رقم الهاتف والتحقق منه!")
+                else:
+                    await update.message.reply_text("✅ Phone number updated and verified!")
+                
+                await show_student_profile(update, context, container)
+            else:
+                await update.message.reply_text(verify_message)
+        return True
+    
+    elif field == "residence":
+        is_valid, value, error = validate_residence(text, lang)
+        if not is_valid:
+            await update.message.reply_text(error)
+            return True
+        student.residence = value
+        student.updated_at = now_syria()
+        await container.student_repo.save(student)
+        context.user_data.pop('profile_edit', None)
+        
+        if lang == Language.ARABIC:
+            await update.message.reply_text("✅ تم تحديث مكان الإقامة!")
+        else:
+            await update.message.reply_text("✅ Residence updated!")
+        
+        await show_student_profile(update, context, container)
+        return True
+    
+    return False
+
+
+async def handle_profile_view_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    container,
+) -> bool:
+    """Handle profile view callback."""
+    query = update.callback_query
+    if not query or query.data != f"{PROFILE_PREFIX}view":
+        return False
+    
+    context.user_data.pop('profile_edit', None)
+    await show_student_profile(update, context, container)
+    return True

@@ -63,6 +63,12 @@ def get_main_menu_keyboard(lang: Language, is_admin_user: bool = False) -> Inlin
         f"{NAV_PREFIX}materials"
     )
     
+    # My Profile
+    builder.add_button_row(
+        "👤 " + ("ملفي الشخصي" if lang == Language.ARABIC else "My Profile"),
+        "profile_view"
+    )
+    
     # Language and Help in same row
     builder.add_button(
         f"{Emoji.LANGUAGE} " + ("اللغة" if lang == Language.ARABIC else "Language"),
