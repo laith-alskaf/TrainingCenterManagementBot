@@ -125,7 +125,7 @@ src/
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/training-center-platform.git
+git clone https://github.com/laith-alskaf/training-center-platform.git
 cd training-center-platform
 
 # Create virtual environment
